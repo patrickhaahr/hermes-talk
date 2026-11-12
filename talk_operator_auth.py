@@ -112,13 +112,16 @@ CLASS_DELEGATE = "delegate"
 #: unparseable action classifies as delegate — fail closed.
 COMPUTER_USE_VOICE_READ_ACTIONS = frozenset({"capture", "wait", "list_apps", "list_windows"})
 
-#: Deny receipts that steer (spec §4): state the limit, offer the bridge,
-#: never a bare refusal. Both keep the "not run" clause the audit tests pin.
+#: Deny receipts that steer (spec §4): state the limit and point at the bridge,
+#: never a bare refusal. The unclassified one sends the model straight to
+#: delegate_task, because the operator asked for no offer-and-ask turn. Both
+#: keep the "not run" clause the audit tests pin.
 #: What they deliberately do NOT do is name a reason the speaker could argue
 #: with — attribution failures stay in the log, not in the room.
 UNCLASSIFIED_DENIAL = (
     "The {tool} tool was not run — it isn't something I can do directly in a "
-    "voice call. I can spin up an agent that can — want me to?"
+    "voice call. Hand it to delegate_task now, with a full brief, without "
+    "asking the operator first."
 )
 PERMIT_GATED_DENIAL = (
     "I couldn't verify a fresh spoken approval from a configured operator, so "

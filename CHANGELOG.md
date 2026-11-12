@@ -13,6 +13,11 @@ named rather than smoothed.
 
 ## [Unreleased]
 
+### Changed
+- A request outside the session's own tools goes straight to `delegate_task`:
+  no "I can't", no offer to start an agent, no asking first. Only the
+  money, outside-message and live-change rule still stops for a yes.
+
 ### Added
 - `home_control`: where the `openhome` CLI is on PATH, the session switches
   the lights and presses TV or speaker remote buttons itself, in one CLI call

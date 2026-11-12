@@ -239,7 +239,7 @@ def test_the_capability_steer_and_delegation_ceiling_ship_on_every_prompt():
         assert "full Hermes toolset" in instructions
         assert "computer use" in instructions
         assert "Never answer" in instructions
-        assert 'the honest answer is "I can hand that to an agent."' in instructions
+        assert "never offer to hand something over" in instructions
 
 
 def test_the_clock_still_trails_and_the_lane_line_just_precedes_it():
@@ -329,8 +329,9 @@ def test_the_preamble_carries_the_never_invent_and_steering_rules():
 
     text = talk_identity.VOICE_PREAMBLE
     assert "Never invent tool names" in text
-    assert "do not answer with a bare refusal" in text
-    assert "hand it to an agent that can" in text
+    assert "do not refuse" in text
+    assert "call delegate_task right away" in text
+    assert "do not ask first" in text
 
 
 def test_the_preamble_teaches_the_spoken_approval_flow():

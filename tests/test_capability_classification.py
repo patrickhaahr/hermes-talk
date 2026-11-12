@@ -165,7 +165,7 @@ def test_computer_use_destructive_action_is_never_permitted_by_voice(monkeypatch
 
     assert denial is not None
     assert "not run" in denial
-    assert "spin up an agent" in denial
+    assert "Hand it to delegate_task now" in denial
 
 
 def test_unclassified_host_tool_gets_the_steering_denial_even_for_operators(monkeypatch):
@@ -184,7 +184,7 @@ def test_unclassified_host_tool_gets_the_steering_denial_even_for_operators(monk
     assert denial is not None
     assert "not run" in denial
     assert "isn't something I can do directly in a voice call" in denial
-    assert "spin up an agent that can — want me to?" in denial
+    assert "Hand it to delegate_task now" in denial
 
 
 def test_unclassified_denial_does_not_leak_attribution_detail(monkeypatch):

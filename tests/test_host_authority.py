@@ -601,7 +601,7 @@ def test_local_lane_never_dispatches_a_delegate_class_host_tool():
     assert attachment.minted == []  # nothing reached the canonical host batch
     for result in results:
         assert "was not run" in result[0].output
-        assert "spin up an agent" in result[0].output
+        assert "Hand it to delegate_task now" in result[0].output
 
 
 def test_local_lane_still_dispatches_inline_safe_permit_reads_and_talk_tools():
