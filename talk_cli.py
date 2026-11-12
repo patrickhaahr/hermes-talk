@@ -2459,6 +2459,8 @@ def setup_cli(subparser: argparse.ArgumentParser) -> None:
                       help="hassmic's Wyoming port (default 16700)")
     echo.add_argument("--idle", dest="echo_idle", type=float, default=20.0, metavar="SECONDS",
                       help="end a session after this long with nobody speaking (default 20)")
+    echo.add_argument("--barge-in-level", dest="echo_barge_in", type=float, default=0.02,
+                      metavar="RMS", help="mic level that may talk over the Echo (default 0.02)")
     subparser.set_defaults(talk_command="session")
 
 
@@ -2512,7 +2514,9 @@ def cli_entry(
             from . import talk_echo
         except ImportError:  # pragma: no cover - flat-module fallback
             import talk_echo
-        return talk_echo.cli_entry(args.echo_host, args.echo_port, args.echo_idle)
+        return talk_echo.cli_entry(
+            args.echo_host, args.echo_port, args.echo_idle, args.echo_barge_in
+        )
     if command == "diagnostics":
         bundle = getattr(args, "diagnostics_bundle", None)
         code = talk_diagnostics.cli_entry(

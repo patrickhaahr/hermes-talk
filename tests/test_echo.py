@@ -262,3 +262,25 @@ def test_wake_word_runs_a_session_on_the_echo_and_hands_it_back_when_quiet(monke
     assert types.index("audio-start") < types.index("audio-chunk") < types.index("audio-stop")
     assert sum(len(e.payload) for e in received if e.type == "audio-chunk") == len(_ms(50))
     assert json.loads(json.dumps(received[types.index("audio-start")].data))["rate"] == 24000
+
+
+def test_while_the_echo_speaks_only_a_voice_louder_than_its_echo_gets_through():
+    """The echo canceller's leftover of the reply must not reach the session as the operator."""
+
+    clock = Clock()
+    audio = EchoAudio(lambda _: None, clock=clock, barge_in_level=0.02)
+    leftover = _pcm([300, -300] * 501)  # about -40 dBFS
+    voice = _pcm([4000, -4000] * 501)  # about -18 dBFS
+    audio.queue_playback(_ms(1000), "reply")
+    audio.pace_once()
+
+    audio.feed_microphone(leftover)
+    assert set(audio.read_input_chunk()) == {0}
+    audio.feed_microphone(voice)
+    assert set(audio.read_input_chunk()) != {0}
+
+    clock.now += talk_echo.PLAYBACK_LEAD_S + talk_echo.ECHO_TAIL_S + 0.01
+    audio.drain_playback()
+    audio.feed_microphone(leftover)
+    assert set(audio.read_input_chunk()) != {0}
+    assert "1 gated under 0.02" in audio.level_report()

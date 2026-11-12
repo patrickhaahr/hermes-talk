@@ -53,6 +53,13 @@ MAX_PLAYBACK_BYTES = talk_audio.MAX_PLAYBACK_BYTES
 #: Microphone level (normalized RMS) that counts as someone talking, for the
 #: quiet timer only. hassmic brings speech to about -26 dBFS (0.05).
 SPEECH_LEVEL = 0.02
+#: While the Echo speaks, quieter microphone audio goes to the session as
+#: silence: what Amazon's echo canceller leaves of the reply would otherwise
+#: be heard as the operator, and answered. Someone talking over the reply is
+#: louder and still cuts it. Normalized RMS; 0.02 is -34 dBFS.
+DEFAULT_BARGE_IN_LEVEL = 0.02
+#: How long the room still rings with the reply after the last audio played.
+ECHO_TAIL_S = 0.3
 
 CONNECT_TIMEOUT_S = 10.0
 RECONNECT_MIN_S = 1.0
@@ -177,10 +184,17 @@ class EchoAudio:
     """
 
     def __init__(
-        self, write: Callable[[bytes], None], *, clock: Callable[[], float] = time.monotonic
+        self,
+        write: Callable[[bytes], None],
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        barge_in_level: float = DEFAULT_BARGE_IN_LEVEL,
     ) -> None:
         self._write = write
         self._clock = clock
+        self._barge_in_level = barge_in_level
+        self._levels: dict[bool, list[float]] = {True: [], False: []}
+        self._gated = 0
         self._lock = threading.Lock()
         self._upsampler = Upsampler()
         self._input: deque[bytes] = deque()
@@ -227,9 +241,17 @@ class EchoAudio:
         pcm = self._upsampler.feed(pcm16k)
         if not pcm:
             return
-        if talk_audio._pcm16_rms(pcm) >= SPEECH_LEVEL:
-            self._last_activity = self._clock()
+        level = talk_audio._pcm16_rms(pcm)
         with self._lock:
+            echo_playing = self._sent_until + ECHO_TAIL_S > self._clock()
+            levels = self._levels[echo_playing]
+            if len(levels) < 20_000:
+                levels.append(level)
+            if echo_playing and level < self._barge_in_level:
+                pcm = bytes(len(pcm))
+                self._gated += 1
+            elif level >= SPEECH_LEVEL:
+                self._last_activity = self._clock()
             if self._input_paused:
                 return
             self._input.append(pcm)
@@ -238,6 +260,23 @@ class EchoAudio:
             while self._input_bytes > MAX_INPUT_BYTES:
                 self._input_bytes -= len(self._input.popleft())
                 self._dropped_input_blocks += 1
+
+    def level_report(self) -> str:
+        """Microphone levels with and without the Echo speaking, to tune the barge-in level."""
+
+        def summary(values: list[float]) -> str:
+            if not values:
+                return "none"
+            ordered = sorted(values)
+            median, p95, top = (ordered[int(q * (len(ordered) - 1))] for q in (0.5, 0.95, 1.0))
+            return f"median {median:.3f}, p95 {p95:.3f}, max {top:.3f} ({len(ordered)} chunks)"
+
+        with self._lock:
+            return (
+                f"microphone while the Echo spoke: {summary(self._levels[True])}, "
+                f"{self._gated} gated under {self._barge_in_level}; "
+                f"otherwise: {summary(self._levels[False])}"
+            )
 
     def quiet_s(self) -> float:
         """Seconds since anyone spoke, the Echo included."""
@@ -391,8 +430,9 @@ class _Conversation:
         runner: SessionRunner,
         idle_s: float,
         on_end: Callable[[_Conversation], None],
+        barge_in_level: float = DEFAULT_BARGE_IN_LEVEL,
     ) -> None:
-        self.audio = EchoAudio(write)
+        self.audio = EchoAudio(write, barge_in_level=barge_in_level)
         self._write = write
         self._idle_s = idle_s
         self._on_end = on_end
@@ -421,6 +461,7 @@ class _Conversation:
             self._session.cancel()
         await asyncio.gather(self._session, return_exceptions=True)
         self.audio.stop()
+        _log.info("echo: %s", self.audio.level_report())
         if notify_echo:
             self._write(self.audio.end_event(failed=failed))
         if asyncio.current_task() is not self._watch:
@@ -428,7 +469,11 @@ class _Conversation:
 
 
 async def _linked(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, runner: SessionRunner, idle_s: float
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    runner: SessionRunner,
+    idle_s: float,
+    barge_in_level: float,
 ) -> None:
     """Drive one connection to the Echo until it closes."""
 
@@ -450,7 +495,9 @@ async def _linked(
             elif event.type == "run-pipeline":
                 if conversation is None:
                     _log.info("echo: wake word, starting a Talk session")
-                    conversation = _Conversation(writer.write, runner, idle_s, ended)
+                    conversation = _Conversation(
+                        writer.write, runner, idle_s, ended, barge_in_level
+                    )
             elif event.type == "ping":
                 writer.write(encode_event("pong"))
             elif event.type == "info":
@@ -466,6 +513,7 @@ async def serve(
     port: int = DEFAULT_PORT,
     *,
     idle_s: float = DEFAULT_IDLE_S,
+    barge_in_level: float = DEFAULT_BARGE_IN_LEVEL,
     runner: SessionRunner | None = None,
 ) -> None:
     """Stay linked to the Echo at ``host``, reconnecting with backoff. Runs until cancelled."""
@@ -489,7 +537,7 @@ async def serve(
         else:
             delay = RECONNECT_MIN_S
             try:
-                await _linked(reader, writer, runner, idle_s)
+                await _linked(reader, writer, runner, idle_s, barge_in_level)
                 _log.warning("echo: %s:%d closed the connection", host, port)
             except (OSError, WyomingError) as exc:
                 _log.warning("echo: link to %s:%d lost (%s)", host, port, exc)
@@ -499,13 +547,24 @@ async def serve(
         delay = min(delay * 2, RECONNECT_MAX_S)
 
 
-def cli_entry(host: str, port: int = DEFAULT_PORT, idle_s: float = DEFAULT_IDLE_S) -> int:
+def cli_entry(
+    host: str,
+    port: int = DEFAULT_PORT,
+    idle_s: float = DEFAULT_IDLE_S,
+    barge_in_level: float = DEFAULT_BARGE_IN_LEVEL,
+) -> int:
     """``hermes talk echo HOST``: serve one Echo until Ctrl+C."""
 
-    logging.basicConfig(level=logging.INFO, format="talk: %(message)s")
+    # Our own handler: the Hermes host configures the root logger first, which
+    # makes logging.basicConfig a no-op and these lines vanish.
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("talk: %(message)s"))
+    _log.addHandler(handler)
+    _log.setLevel(logging.INFO)
+    _log.propagate = False
     print(f"talk: serving the Echo at {host}:{port}; say its wake word. Ctrl+C to stop.")
     try:
-        asyncio.run(serve(host, port, idle_s=idle_s))
+        asyncio.run(serve(host, port, idle_s=idle_s, barge_in_level=barge_in_level))
     except KeyboardInterrupt:
         print("\ntalk: stopped.")
     return 0
