@@ -2450,6 +2450,15 @@ def setup_cli(subparser: argparse.ArgumentParser) -> None:
             "Talk state directory) and print where it went"
         ),
     )
+    echo = commands.add_parser(
+        "echo",
+        help="Serve an Echo running hassmic (Wyoming): each wake word is a Talk session",
+    )
+    echo.add_argument("echo_host", metavar="HOST", help="the Echo's address")
+    echo.add_argument("--port", dest="echo_port", type=int, default=16700,
+                      help="hassmic's Wyoming port (default 16700)")
+    echo.add_argument("--idle", dest="echo_idle", type=float, default=20.0, metavar="SECONDS",
+                      help="end a session after this long with nobody speaking (default 20)")
     subparser.set_defaults(talk_command="session")
 
 
@@ -2498,6 +2507,12 @@ def cli_entry(
         if code:
             raise SystemExit(code)
         return 0
+    if command == "echo":
+        try:
+            from . import talk_echo
+        except ImportError:  # pragma: no cover - flat-module fallback
+            import talk_echo
+        return talk_echo.cli_entry(args.echo_host, args.echo_port, args.echo_idle)
     if command == "diagnostics":
         bundle = getattr(args, "diagnostics_bundle", None)
         code = talk_diagnostics.cli_entry(

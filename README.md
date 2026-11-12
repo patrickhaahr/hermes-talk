@@ -148,6 +148,7 @@ differs from verbatim TTS: [docs/XAI-SPEECH-TAGS.md](docs/XAI-SPEECH-TAGS.md).
 | Inside a Hermes session | `/talk` — the one surface with an **attached** agent loop, so lookups and delegation answer inline |
 | Discord voice channel | `/voice join`, then `/talk join [TARGET]` |
 | Dashboard **Talk** tab | `hermes dashboard`, select a task, **Start** |
+| Amazon Echo | `hermes talk echo HOST` — an Echo running [echo-dot-assist](https://github.com/Gamer92000/echo-dot-assist)'s hassmic with `PROTO=wyoming`; each wake word starts a session, which ends after `--idle` seconds of quiet (default 20). Full duplex needs hassmic to keep its microphone open while it speaks; stock hassmic gives one exchange per wake word |
 | Desktop **Talk** composer action | open a conversation → **Talk** → **Connect**; works on stock Desktop, with a floating window on the Talk-enabled build ([host lanes](docs/DESKTOP.md)) |
 
 ## Is it working?

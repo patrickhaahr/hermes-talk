@@ -14,6 +14,13 @@ named rather than smoothed.
 ## [Unreleased]
 
 ### Added
+- `hermes talk echo HOST`: an Amazon Echo running echo-dot-assist's
+  hassmic in Wyoming mode as a Talk surface, with no Home Assistant between.
+  Each wake word starts a session on the Echo's microphone and speaker,
+  using Amazon's echo canceller and wake word engine; the session ends after
+  `--idle` seconds of quiet and the Echo waits for its wake word again.
+  Playback is paced from Hermes 150 ms ahead, so barge-in still discards
+  unheard audio.
 - `TALK_PROVIDER=local`: run the voice lane on your own GPU against any
   self-hosted server that speaks the OpenAI Realtime protocol, such as
   huggingface/speech-to-speech with an Ollama LLM, on the terminal lane.
