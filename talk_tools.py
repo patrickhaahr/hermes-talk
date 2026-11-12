@@ -35,6 +35,7 @@ try:
         talk_config,
         talk_core_realtime,
         talk_doctor,
+        talk_home,
         talk_host,
         talk_identity,
         talk_pause,
@@ -50,6 +51,7 @@ except ImportError:  # pragma: no cover - flat-module fallback (Hermes file-path
     import talk_config
     import talk_core_realtime
     import talk_doctor
+    import talk_home
     import talk_host
     import talk_identity
     import talk_pause
@@ -467,6 +469,8 @@ def default_talk_tools(*, pausable: bool = False) -> list[dict]:
     ]
     if pausable:
         tools.append(_TOOL_PAUSE_VOICE_INPUT)
+    if talk_home.available():
+        tools.insert(1, talk_home.TOOL)
     try:
         if talk_vault.available():
             tools.insert(1, _TOOL_SEARCH_VAULT)
@@ -868,6 +872,7 @@ def _handle_talk_capabilities(arguments: dict) -> str:
 
 
 _HANDLERS = {
+    "home_control": talk_home.run,
     "search_memory": _handle_search_memory,
     "search_vault": _handle_search_vault,
     "delegate_task": _handle_delegate_task,

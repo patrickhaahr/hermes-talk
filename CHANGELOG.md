@@ -14,6 +14,11 @@ named rather than smoothed.
 ## [Unreleased]
 
 ### Added
+- `home_control`: where the `openhome` CLI is on PATH, the session switches
+  the lights and presses TV or speaker remote buttons itself, in one CLI call
+  with no spoken approval and no delegated agent run. Before this, "turn off
+  the lights" took a spoken plan, a yes and a 20 to 85 second agent run. The
+  Echo lane also asks for one-sentence replies.
 - `hermes talk echo HOST`: an Amazon Echo running echo-dot-assist's
   hassmic in Wyoming mode as a Talk surface, with no Home Assistant between.
   Each wake word starts a session on the Echo's microphone and speaker,

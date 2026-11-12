@@ -60,7 +60,14 @@ READ_ONLY_TALK_TOOLS = frozenset(
     }
 )
 MUTATING_TALK_TOOLS = frozenset(
-    {"delegate_task", "steer_agent", "redirect_agent", "stop_work", "resolve_approval"}
+    {
+        "home_control",
+        "delegate_task",
+        "steer_agent",
+        "redirect_agent",
+        "stop_work",
+        "resolve_approval",
+    }
 )
 
 MUTATION_DENIAL = (

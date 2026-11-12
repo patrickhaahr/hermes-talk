@@ -169,3 +169,12 @@ def _ephemeral_runs_optin(monkeypatch):
     """
 
     monkeypatch.setenv("TALK_RUNS_ALLOW_EPHEMERAL", "1")
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_home_control(monkeypatch):
+    """``openhome`` on PATH is a property of the box; the advertised tools must not be."""
+
+    import talk_home
+
+    monkeypatch.setattr(talk_home, "available", lambda: False)

@@ -152,7 +152,9 @@ LANE_LINES: dict[str, str] = {
     ),
     "echo": (
         "You are speaking through an Amazon Echo speaker in the operator's home — "
-        "the call ends by itself after a quiet spell, and its wake word starts a new one."
+        "the call ends by itself after a quiet spell, and its wake word starts a new one. "
+        "Keep every reply to one short sentence, and carry out a home command without "
+        "a preamble."
     ),
 }
 
