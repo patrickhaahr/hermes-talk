@@ -239,6 +239,7 @@ class EchoAudio:
         self._sent_until = 0.0
         self._started_reply = False
         self._last_activity = clock()
+        self._last_spoke = clock()
         self._pacer: asyncio.Task | None = None
 
     # -- lifecycle ------------------------------------------------------------
@@ -279,7 +280,7 @@ class EchoAudio:
                 pcm = bytes(len(pcm))
                 self._gated += 1
             elif level >= SPEECH_LEVEL:
-                self._last_activity = self._clock()
+                self._last_activity = self._last_spoke = self._clock()
             if self._input_paused:
                 return
             self._input.append(pcm)
@@ -305,6 +306,11 @@ class EchoAudio:
                 f"{self._gated} gated under {self._barge_in_level}; "
                 f"otherwise: {summary(self._levels[False])}"
             )
+
+    def since_spoke(self) -> float:
+        """Seconds since the operator's voice was last heard: the latency measure in the log."""
+
+        return self._clock() - self._last_spoke
 
     def mark_activity(self) -> None:
         self._last_activity = self._clock()
@@ -349,6 +355,7 @@ class EchoAudio:
         with self._lock:
             if not self._playback:
                 return
+            fresh = self._sent_until + ECHO_TAIL_S < now
             self._sent_until = max(self._sent_until, now)
             due = round((now + PLAYBACK_LEAD_S - self._sent_until) * RATE) * FRAME_BYTES
             if due <= 0:
@@ -357,6 +364,8 @@ class EchoAudio:
             self._sent_until += len(chunk) / (RATE * FRAME_BYTES)
             begin = not self._started_reply
             self._started_reply = True
+        if fresh:
+            _log.info("echo: reply audio, %.2f s after the operator last spoke", self.since_spoke())
         if begin:
             if self._on_speech is not None:
                 self._on_speech()
@@ -575,6 +584,14 @@ END_CALL_TOOL: dict = {
 }
 
 
+def note_action(what: str) -> None:
+    """Log a tool call or delegation with its latency, for comparing voice models."""
+
+    if _calling is not None:
+        _log.info("echo: action %s, %.2f s after the operator last spoke",
+                  what[:120], _calling.since_spoke())
+
+
 def run_end_call(arguments: dict) -> str:
     audio = _calling
     if audio is None:
@@ -747,10 +764,14 @@ async def serve(
 
     if runner is None:
         try:
-            from . import talk_cli
+            from . import talk_cli, talk_config, talk_echo_live
         except ImportError:  # pragma: no cover - flat-module fallback
             import talk_cli
-        runner = talk_cli.run_talk_session
+            import talk_config
+            import talk_echo_live
+        live = talk_config.voice_mode() == "live"
+        runner = talk_echo_live.run_live_session if live else talk_cli.run_talk_session
+        _log.info("echo: voice %s", "GPT-Live" if live else "Realtime")
     say_queue: asyncio.Queue = asyncio.Queue()
     says = await _serve_says(say_queue)
     try:
@@ -795,7 +816,7 @@ def cli_entry(
     # Our own handler: the Hermes host configures the root logger first, which
     # makes logging.basicConfig a no-op and these lines vanish.
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("talk: %(message)s"))
+    handler.setFormatter(logging.Formatter("%(asctime)s.%(msecs)03d talk: %(message)s", "%H:%M:%S"))
     _log.addHandler(handler)
     _log.setLevel(logging.INFO)
     _log.propagate = False

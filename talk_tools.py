@@ -490,6 +490,7 @@ def execute_talk_tool(name: str, arguments: dict | None) -> str:
     handler = _HANDLERS.get(name)
     if handler is None:
         raise TalkToolError(f"unknown talk tool: {name!r}")
+    talk_echo.note_action(f"{name} {json.dumps(arguments or {}, ensure_ascii=False)}")
     try:
         output = handler(arguments or {})
     except Exception as exc:  # noqa: BLE001 — the model speaks the failure

@@ -22,6 +22,14 @@ MAX_REPEAT = 10
 #: Spoken device name → the CLI words before the command.
 DEVICES = {"lights": ("lights",), "tv": ("ir", "lgtv"), "speaker": ("ir", "edifier")}
 
+#: What each device takes, for the model: read by the tool here and by GPT-Live's guide.
+COMMANDS = (
+    "lights: on or off. tv: power (it toggles, so it serves both on and "
+    "off), volume-up, volume-down, mute, input, hdmi-1, hdmi-2, hdmi-3, "
+    "home, back, ok, up, down, left, right, channel-up, channel-down. "
+    "speaker: power, volume-up, volume-down, mute, bluetooth, optical."
+)
+
 TOOL: dict = {
     "type": "function",
     "name": "home_control",
@@ -29,11 +37,7 @@ TOOL: dict = {
         "Switch the operator's lights or press a button on the TV or speaker "
         "remote. The operator has pre-approved every call: the moment you are "
         "asked, call this. Do not confirm, do not announce it, and do not "
-        "delegate it. Afterwards say at most a word or two, like 'Done.' "
-        "lights: on or off. tv: power (it toggles, so it serves both on and "
-        "off), volume-up, volume-down, mute, input, hdmi-1, hdmi-2, hdmi-3, "
-        "home, back, ok, up, down, left, right, channel-up, channel-down. "
-        "speaker: power, volume-up, volume-down, mute, bluetooth, optical."
+        "delegate it. Afterwards say at most a word or two, like 'Done.' " + COMMANDS
     ),
     "parameters": {
         "type": "object",
