@@ -522,6 +522,9 @@ class _Conversation:
         self.active = True
         self.audio.mark_activity()
         _calling = self.audio
+        # A standby's prompt clock is from when it connected, up to
+        # STANDBY_REFRESH_S ago: the call brings it up to date.
+        self.announcements.put_nowait(clock_commands())
         _log.info("echo: call started")
 
     async def _watch_session(self) -> None:
@@ -598,6 +601,18 @@ def run_end_call(arguments: dict) -> str:
         return "There is no call on the Echo to end."
     audio.request_hang_up()
     return "Hanging up after your goodbye. Say nothing more than the goodbye."
+
+
+def clock_commands() -> list:
+    try:
+        from . import talk_identity, talk_realtime
+    except ImportError:  # pragma: no cover - flat-module fallback
+        import talk_identity
+        import talk_realtime
+    return [talk_realtime.AddContext(
+        item_id=f"talkclock{uuid.uuid4().hex[:20]}",
+        text=f"The call starts now. {talk_identity.current_moment()}",
+    )]
 
 
 def say_commands(text: str) -> list:

@@ -192,10 +192,9 @@ def _announcement_commands(
     - The item DELETES ITSELF: a client-minted item id and a trailing
       ``conversation.item.delete`` ride the same batch, so the raw report
       exists for exactly one tools-disabled response and never persists
-      into later tool-enabled turns with system-level priority. (The
-      response snapshots conversation state at creation; the delete only
-      shapes what FUTURE turns see — a server that raced it would merely
-      thin the announcement, never widen the injection window.)
+      into later tool-enabled turns with system-level priority. The pump
+      holds that delete until the response has been heard: sent at once it
+      won the race, and the model spoke without the report.
     """
 
     item_id = f"talkann{uuid.uuid4().hex[:20]}"
@@ -235,6 +234,9 @@ ANNOUNCE_IDLE_POLL_S = 0.05
 #: that never clears (a stuck continuation, a speaker that never drains)
 #: starves the pump as a silent slow poll with nothing to see. Zero disables.
 ANNOUNCE_STARVATION_WARN_S = 30.0
+#: How long the pump waits for an announcement's response to start before it
+#: sends the trailing delete anyway (see :func:`_split_cleanup`).
+ANNOUNCE_RESPONSE_START_S = 5.0
 #: Why a session refused BEFORE it went live. A lane that shows the operator a
 #: receipt (Discord) renders these; they are bounded codes, never exception
 #: text, because that receipt lands in a chat channel where a token, a path, or
@@ -739,6 +741,36 @@ def _announcement_starved(on_starved, waited: float) -> None:
         on_starved(waited)
 
 
+def _is_cleanup(command) -> bool:
+    return isinstance(command, talk_realtime.RemoveContext) or (
+        isinstance(command, dict) and command.get("type") == "conversation.item.delete"
+    )
+
+
+def _split_cleanup(batch: list) -> tuple[list, list]:
+    """The batch, and the trailing deletes that must wait for its response.
+
+    Sent in one batch, the delete reached the server before the response had
+    read the item: the model announced a finished run without its report and
+    said it could not see the result.
+    """
+
+    split = len(batch)
+    while split and _is_cleanup(batch[split - 1]):
+        split -= 1
+    return list(batch[:split]), list(batch[split:])
+
+
+async def _response_heard(busy) -> None:
+    """Wait for the response just requested to start and then finish."""
+
+    deadline = time.monotonic() + ANNOUNCE_RESPONSE_START_S
+    while not busy() and time.monotonic() < deadline:
+        await asyncio.sleep(ANNOUNCE_IDLE_POLL_S)
+    while busy():
+        await asyncio.sleep(ANNOUNCE_IDLE_POLL_S)
+
+
 async def pump_announcements(
     announce_queue, relay, ws, send_batch=None, response_busy=None, on_starved=None
 ) -> None:
@@ -764,54 +796,66 @@ async def pump_announcements(
     indistinguishable from a quiet session unless something says so.
     """
 
+    busy = response_busy or (lambda: relay.response_active)
     while True:
         queued = await announce_queue.get()
         if isinstance(queued, QueuedAnnouncement):
             batch, on_sent = queued.commands, queued.on_sent
         else:
             batch, on_sent = queued, None
-        # Per BATCH, not per wait loop: a batch declined by send_batch goes
-        # round again, and its clock must keep running across that retry.
-        waiting_since: float | None = None
-        starved = False
-        while True:
-            while response_busy() if response_busy is not None else relay.response_active:
-                if waiting_since is None:
-                    waiting_since = time.monotonic()
-                elif not starved and ANNOUNCE_STARVATION_WARN_S > 0:
-                    waited = time.monotonic() - waiting_since
-                    if waited >= ANNOUNCE_STARVATION_WARN_S:
-                        starved = True
-                        _announcement_starved(on_starved, waited)
-                await asyncio.sleep(ANNOUNCE_IDLE_POLL_S)
-            try:
-                if send_batch is None:
-                    for out in batch:
-                        await ws.send_json(out)
-                    _announcement_sent(on_sent)
-                    break
-                # The poll above is check-then-act: a response can start while
-                # this batch waits for the send lock. send_batch re-checks
-                # inside that lock and declines rather than writing into a live
-                # response, so a declined batch waits for idle and goes again —
-                # deferred in its original order, never dropped.
-                if await send_batch(batch, is_announcement=True):
-                    # The batch is on the wire — NOW the result counts as
-                    # delivered (two-phase claim; see QueuedAnnouncement).
-                    _announcement_sent(on_sent)
-                    break
-                # Declined. In-repo the busy predicate is a strict superset of
-                # send_outgoing's decline condition, so the wait loop above
-                # absorbs the retry — but a future caller could miswire the
-                # predicate (send_batch declining while "idle"). Sleep here so
-                # that mistake degrades to polling instead of a hot spin.
-                await asyncio.sleep(ANNOUNCE_IDLE_POLL_S)
-            except Exception:
-                if send_batch is not None:
-                    # Provider-session sends are terminal once rejected. Let the
-                    # monitored pump fail so the supervisor tears down the call.
-                    raise
-                break
+        batch, cleanup = _split_cleanup(batch)
+        if not batch:
+            batch, cleanup = cleanup, []
+        if await _send_when_idle(batch, ws, send_batch, busy, on_starved):
+            _announcement_sent(on_sent)
+            if cleanup:
+                await _response_heard(busy)
+                await _send_when_idle(cleanup, ws, send_batch, busy, on_starved)
+
+
+async def _send_when_idle(batch, ws, send_batch, busy, on_starved) -> bool:
+    """One batch onto the wire once no response is in flight; False if it was dropped."""
+
+    # Per BATCH, not per wait loop: a batch declined by send_batch goes
+    # round again, and its clock must keep running across that retry.
+    waiting_since: float | None = None
+    starved = False
+    while True:
+        while busy():
+            if waiting_since is None:
+                waiting_since = time.monotonic()
+            elif not starved and ANNOUNCE_STARVATION_WARN_S > 0:
+                waited = time.monotonic() - waiting_since
+                if waited >= ANNOUNCE_STARVATION_WARN_S:
+                    starved = True
+                    _announcement_starved(on_starved, waited)
+            await asyncio.sleep(ANNOUNCE_IDLE_POLL_S)
+        try:
+            if send_batch is None:
+                for out in batch:
+                    await ws.send_json(out)
+                return True
+            # The poll above is check-then-act: a response can start while
+            # this batch waits for the send lock. send_batch re-checks
+            # inside that lock and declines rather than writing into a live
+            # response, so a declined batch waits for idle and goes again —
+            # deferred in its original order, never dropped.
+            if await send_batch(batch, is_announcement=True):
+                # The batch is on the wire — NOW the result counts as
+                # delivered (two-phase claim; see QueuedAnnouncement).
+                return True
+            # Declined. In-repo the busy predicate is a strict superset of
+            # send_outgoing's decline condition, so the wait loop above
+            # absorbs the retry — but a future caller could miswire the
+            # predicate (send_batch declining while "idle"). Sleep here so
+            # that mistake degrades to polling instead of a hot spin.
+            await asyncio.sleep(ANNOUNCE_IDLE_POLL_S)
+        except Exception:
+            if send_batch is not None:
+                # Provider-session sends are terminal once rejected. Let the
+                # monitored pump fail so the supervisor tears down the call.
+                raise
+            return False
 
 
 def landed_note_messages(subagent_id: str) -> list[dict]:

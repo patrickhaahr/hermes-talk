@@ -1316,7 +1316,8 @@ async def _drain(ws, expected: int, timeout_steps: int = 300) -> None:
         await asyncio.sleep(0.01)
 
 
-def test_pump_keeps_concurrent_announcements_contiguous():
+def test_pump_keeps_concurrent_announcements_contiguous(monkeypatch):
+    monkeypatch.setattr(talk_cli, "ANNOUNCE_RESPONSE_START_S", 0.02)  # no server here
     # Codex v0.6.1 finding 3: two landings announced concurrently must not
     # interleave create-A, create-B, response-A … — one response would see
     # both temporary items. The pump serializes whole batches.
@@ -1348,6 +1349,7 @@ def test_pump_keeps_concurrent_announcements_contiguous():
 
 def test_pump_defers_while_a_response_is_in_flight(monkeypatch):
     monkeypatch.setattr(talk_cli, "ANNOUNCE_IDLE_POLL_S", 0.01)
+    monkeypatch.setattr(talk_cli, "ANNOUNCE_RESPONSE_START_S", 0.02)
 
     async def scenario():
         announce_queue: asyncio.Queue = asyncio.Queue()
@@ -1366,7 +1368,8 @@ def test_pump_defers_while_a_response_is_in_flight(monkeypatch):
     assert len(sent) == 3  # flowed once the wire went idle
 
 
-def test_pump_survives_a_dying_socket():
+def test_pump_survives_a_dying_socket(monkeypatch):
+    monkeypatch.setattr(talk_cli, "ANNOUNCE_RESPONSE_START_S", 0.02)
     class _FlakyWS:
         def __init__(self):
             self.sent: list[dict] = []
@@ -1401,6 +1404,7 @@ def test_pump_retries_an_announcement_that_lost_the_race_for_the_send_lock(monke
     # waits for the send lock. send_outgoing re-checks inside that lock and
     # declines; the batch has to wait for idle and go again, not be dropped.
     monkeypatch.setattr(talk_cli, "ANNOUNCE_IDLE_POLL_S", 0.01)
+    monkeypatch.setattr(talk_cli, "ANNOUNCE_RESPONSE_START_S", 0.02)
 
     async def scenario():
         announce_queue: asyncio.Queue = asyncio.Queue()
@@ -1429,7 +1433,7 @@ def test_pump_retries_an_announcement_that_lost_the_race_for_the_send_lock(monke
         declined = list(attempts)
         busy["value"] = False
         for _ in range(300):
-            if len(attempts) > 1:
+            if len(attempts) > 2:
                 break
             await asyncio.sleep(0.01)
         pump.cancel()
@@ -1438,13 +1442,50 @@ def test_pump_retries_an_announcement_that_lost_the_race_for_the_send_lock(monke
     declined, attempts = asyncio.run(scenario())
 
     assert len(declined) == 1  # nothing rewritten while the response ran
-    assert len(attempts) == 2
     assert attempts[0] == attempts[1]  # the same batch, not a fresh one
-    assert attempts[1] == (
-        "conversation.item.create",
-        "response.create",
-        "conversation.item.delete",
-    )
+    assert attempts[1:] == [
+        ("conversation.item.create", "response.create"),
+        ("conversation.item.delete",),
+    ]
+
+
+def test_pump_deletes_the_announcement_only_after_the_response_that_speaks_it(monkeypatch):
+    # Live on an Echo, a delete in the same batch as response.create reached the
+    # server first: the model answered without the report ("I can't see the disk
+    # space") although the run had finished. The delete waits for that response.
+    monkeypatch.setattr(talk_cli, "ANNOUNCE_IDLE_POLL_S", 0.01)
+
+    async def scenario():
+        announce_queue: asyncio.Queue = asyncio.Queue()
+        busy = {"value": False}
+        sends: list[tuple[str, ...]] = []
+
+        async def send_batch(batch, *, is_announcement=False):
+            sends.append(tuple(type(command).__name__ for command in batch))
+            return True
+
+        pump = asyncio.create_task(
+            talk_cli.pump_announcements(
+                announce_queue, _StubRelay(), None, send_batch, lambda: busy["value"]
+            )
+        )
+        announce_queue.put_nowait(talk_cli.run_finished_commands(
+            {"runId": 11, "status": "done", "output": "82 GiB free"}))
+        await asyncio.sleep(0.05)
+        busy["value"] = True  # the response starts
+        await asyncio.sleep(0.05)
+        while_speaking = list(sends)
+        busy["value"] = False  # and is heard
+        for _ in range(300):
+            if len(sends) > 1:
+                break
+            await asyncio.sleep(0.01)
+        pump.cancel()
+        return while_speaking, sends
+
+    while_speaking, sends = asyncio.run(scenario())
+    assert while_speaking == [("AddContext", "StartResponse")]
+    assert sends == [("AddContext", "StartResponse"), ("RemoveContext",)]
 
 
 def test_pump_writes_an_uncontested_announcement_exactly_once():

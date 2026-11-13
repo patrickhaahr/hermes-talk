@@ -226,7 +226,12 @@ def current_moment() -> str:
     now = time.localtime()
     zone = time.strftime("%Z", now).strip()
     stamp = time.strftime("%A, %B %d, %Y, %I:%M %p", now).replace(" 0", " ")
-    return f"Right now it is {stamp}{' ' + zone if zone else ''}."
+    # Phrased as the host clock, with leave to use it: a bare "Right now it is"
+    # read as stale, and the model refused to tell the time at all.
+    return (
+        f"Right now it is {stamp}{' ' + zone if zone else ''}, from the host's clock. "
+        "When asked the time or date, answer from this; the call may have run a few minutes since."
+    )
 
 
 LIVE_PREAMBLE = (

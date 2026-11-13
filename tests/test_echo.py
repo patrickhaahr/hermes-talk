@@ -404,6 +404,7 @@ def test_echo_say_reaches_the_standby_session_as_an_announcement(monkeypatch):
     got: list = []
 
     async def session(*, audio, lane, announce_queue=None):
+        got.append(await announce_queue.get())  # the call's clock
         got.append(await announce_queue.get())
         await asyncio.Event().wait()
 
@@ -429,8 +430,9 @@ def test_echo_say_reaches_the_standby_session_as_an_announcement(monkeypatch):
         return answer
 
     assert asyncio.run(go()) == "ok"
-    assert len(got) == 1
-    assert any("the laundry is done" in getattr(c, "text", "") for c in got[0])
+    assert len(got) == 2
+    assert "from the host's clock" in got[0][0].text
+    assert any("the laundry is done" in getattr(c, "text", "") for c in got[1])
 
 
 def test_end_call_waits_for_the_goodbye_then_hangs_up():
@@ -471,3 +473,31 @@ def test_end_call_is_offered_only_to_a_surface_that_can_hang_up():
     assert "end_call" not in names()
     assert talk_tools._HANDLERS["end_call"] is talk_echo.run_end_call
     assert "end_call" in talk_operator_auth.READ_ONLY_TALK_TOOLS
+
+
+def test_a_standby_taking_the_call_learns_the_time_it_started():
+    """The standby's prompt clock can be 15 minutes old; the wake word brings it up to date."""
+
+    import talk_identity
+    import talk_realtime
+
+    async def go():
+        queues = []
+
+        async def session(*, audio, lane, announce_queue=None):
+            queues.append(announce_queue)
+            await asyncio.Event().wait()
+
+        conversation = talk_echo._Conversation(
+            lambda data: None, session, 20.0, lambda c, failed: None, active=False
+        )
+        await asyncio.sleep(0)
+        assert queues[0].empty()
+        conversation.activate()
+        batch = queues[0].get_nowait()
+        await conversation.close(notify_echo=False)
+        return batch
+
+    batch = asyncio.run(go())
+    assert [type(command) for command in batch] == [talk_realtime.AddContext]
+    assert talk_identity.current_moment() in batch[0].text
