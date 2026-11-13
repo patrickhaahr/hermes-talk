@@ -589,7 +589,9 @@ def say_commands(text: str) -> list:
     Unlike a background result this is no untrusted data: only the Hermes
     user can reach the socket. So it is an instruction to say the words as
     they are, not a report to sum up, which the model answered with a
-    generic "what would you like help with?" instead of the message.
+    generic "what would you like help with?" instead of the message. It is
+    not deleted after the response either: the delete raced the response and
+    the model spoke without having read it.
     """
 
     try:
@@ -604,7 +606,6 @@ def say_commands(text: str) -> list:
             f"and nothing else: {text}",
         ),
         talk_realtime.StartResponse(allow_tools=False),
-        talk_realtime.RemoveContext(item_id=item_id),
     ]
 
 
