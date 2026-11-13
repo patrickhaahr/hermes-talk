@@ -1515,6 +1515,7 @@ async def run_talk_session(
     native_task_api=None,
     control_input=None,
     on_native_controller=None,
+    announce_queue: asyncio.Queue | None = None,
 ) -> int:
     """Run one voice session. Returns a process exit code.
 
@@ -1544,6 +1545,9 @@ async def run_talk_session(
     is advertised exactly when an operator resume control is guaranteed
     (that key, or ``/talk resume`` in Discord), and the same control is
     registered with :mod:`talk_pause`, which refuses to pause without one.
+
+    ``announce_queue`` lets the surface hand the session things to say on
+    its own (the Echo's ``echo-say``); it is the queue background results use.
     """
 
     def refuse(reason: str) -> int:
@@ -1619,7 +1623,10 @@ async def run_talk_session(
         tools = (
             host_execution_attachment.tool_definitions()
             if host_execution_attachment is not None
-            else talk_tools.default_talk_tools(pausable=resume_control is not None)
+            else talk_tools.default_talk_tools(
+                pausable=resume_control is not None,
+                hangable=callable(getattr(audio, "request_hang_up", None)),
+            )
         )
     except Exception as exc:  # noqa: BLE001 - host attachment startup boundary
         print(f"talk: host tool setup failed: {type(exc).__name__}", file=sys.stderr)
@@ -2087,7 +2094,8 @@ async def run_talk_session(
                 if isinstance(event, talk_realtime.ResponseFinished):
                     print(flush=True)
 
-        announce_queue: asyncio.Queue = asyncio.Queue()
+        if announce_queue is None:
+            announce_queue = asyncio.Queue()
 
         def on_subagent_event(event: dict) -> None:
             """Queue a child's terminal (or progress) announcement on the loop.
@@ -2461,6 +2469,11 @@ def setup_cli(subparser: argparse.ArgumentParser) -> None:
                       help="end a session after this long with nobody speaking (default 20)")
     echo.add_argument("--barge-in-level", dest="echo_barge_in", type=float, default=0.02,
                       metavar="RMS", help="mic level that may talk over the Echo (default 0.02)")
+    echo_say = commands.add_parser(
+        "echo-say",
+        help="Have the running Echo surface say TEXT, then listen for an answer",
+    )
+    echo_say.add_argument("echo_text", nargs="+", metavar="TEXT", help="what to tell the operator")
     subparser.set_defaults(talk_command="session")
 
 
@@ -2517,6 +2530,17 @@ def cli_entry(
         return talk_echo.cli_entry(
             args.echo_host, args.echo_port, args.echo_idle, args.echo_barge_in
         )
+    if command == "echo-say":
+        try:
+            from . import talk_echo
+        except ImportError:  # pragma: no cover - flat-module fallback
+            import talk_echo
+        try:
+            print(f"talk: echo: {talk_echo.send_say(' '.join(args.echo_text))}")
+        except OSError as exc:
+            print(f"talk: no Echo surface is running here ({exc})", file=sys.stderr)
+            raise SystemExit(1) from exc
+        return 0
     if command == "diagnostics":
         bundle = getattr(args, "diagnostics_bundle", None)
         code = talk_diagnostics.cli_entry(

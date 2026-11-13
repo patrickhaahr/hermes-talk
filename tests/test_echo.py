@@ -12,6 +12,11 @@ import talk_echo
 from talk_echo import EchoAudio, Upsampler, encode_event, read_event
 
 
+@pytest.fixture(autouse=True)
+def _say_socket(monkeypatch, tmp_path):
+    monkeypatch.setattr(talk_echo, "say_socket_path", lambda: tmp_path / "say.sock")
+
+
 def _reader(data: bytes) -> asyncio.StreamReader:
     reader = asyncio.StreamReader()
     reader.feed_data(data)
@@ -213,7 +218,7 @@ def test_wake_word_runs_a_session_on_the_echo_and_hands_it_back_when_quiet(monke
     monkeypatch.setattr(talk_echo, "PACE_TICK_S", 0.005)
     heard: list[bytes] = []
 
-    async def session(*, audio, lane):
+    async def session(*, audio, lane, announce_queue=None):
         assert lane == "echo"
         audio.start()
         try:
@@ -284,3 +289,185 @@ def test_while_the_echo_speaks_only_a_voice_louder_than_its_echo_gets_through():
     audio.feed_microphone(leftover)
     assert set(audio.read_input_chunk()) != {0}
     assert "1 gated under 0.02" in audio.level_report()
+
+
+# -- standby, end_call, echo-say ---------------------------------------------------------
+
+
+def _fake_echo(on_event):
+    """A fake hassmic: answers run-satellite, records events, and lets the test act on each."""
+
+    received: list[talk_echo.WyomingEvent] = []
+
+    async def echo(reader, writer):
+        while (event := await read_event(reader)) is not None:
+            received.append(event)
+            await on_event(event, writer)
+
+    return echo, received
+
+
+def _wake(writer):
+    writer.write(encode_event("run-pipeline", {"start_stage": "asr", "end_stage": "tts"}))
+    writer.write(encode_event("audio-chunk", {"rate": 16000}, _pcm([0] * 1024)))
+
+
+def test_a_standby_session_is_connected_before_the_wake_word_and_takes_the_call(monkeypatch):
+    """The first words reach a session that is already live; the next one is ready after."""
+
+    monkeypatch.setattr(talk_echo, "PACE_TICK_S", 0.005)
+    started: list[float] = []
+    loop_time = []
+
+    async def session(*, audio, lane, announce_queue=None):
+        started.append(asyncio.get_running_loop().time())
+        audio.start()
+        try:
+            while audio.read_input_chunk() is None:
+                await asyncio.sleep(0.005)
+            audio.queue_playback(_ms(20), "reply")
+            await asyncio.Event().wait()
+        finally:
+            audio.stop()
+
+    async def go():
+        stopped = asyncio.Event()
+
+        async def on_event(event, writer):
+            if event.type == "run-satellite":
+                await asyncio.sleep(0.2)  # the standby connects while the room is quiet
+                loop_time.append(asyncio.get_running_loop().time())
+                _wake(writer)
+                await writer.drain()
+            if event.type == "audio-stop":
+                stopped.set()
+
+        echo, received = _fake_echo(on_event)
+        server = await asyncio.start_server(echo, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        surface = asyncio.create_task(
+            talk_echo.serve("127.0.0.1", port, idle_s=0.2, runner=session)
+        )
+        try:
+            await asyncio.wait_for(stopped.wait(), 5)
+            await asyncio.sleep(0.8)  # the next standby
+        finally:
+            surface.cancel()
+            await asyncio.gather(surface, return_exceptions=True)
+            server.close()
+        return received
+
+    received = asyncio.run(go())
+    assert len(started) == 2
+    assert started[0] < loop_time[0], "the call's session started before the wake word"
+    assert [e.type for e in received].count("audio-stop") == 1
+
+
+def test_a_standby_session_that_speaks_on_its_own_becomes_the_call(monkeypatch):
+    monkeypatch.setattr(talk_echo, "PACE_TICK_S", 0.005)
+
+    async def session(*, audio, lane, announce_queue=None):
+        audio.start()
+        try:
+            await asyncio.sleep(0.05)
+            audio.queue_playback(_ms(20), "news")  # a result that landed while nobody listened
+            await asyncio.Event().wait()
+        finally:
+            audio.stop()
+
+    async def go():
+        stopped = asyncio.Event()
+
+        async def on_event(event, writer):
+            if event.type == "audio-stop":
+                stopped.set()
+
+        echo, received = _fake_echo(on_event)
+        server = await asyncio.start_server(echo, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        surface = asyncio.create_task(
+            talk_echo.serve("127.0.0.1", port, idle_s=0.2, runner=session)
+        )
+        try:
+            await asyncio.wait_for(stopped.wait(), 5)
+        finally:
+            surface.cancel()
+            await asyncio.gather(surface, return_exceptions=True)
+            server.close()
+        return [e.type for e in received]
+
+    types = asyncio.run(go())
+    assert types.index("audio-start") < types.index("audio-stop")
+
+
+def test_echo_say_reaches_the_standby_session_as_an_announcement(monkeypatch):
+    got: list = []
+
+    async def session(*, audio, lane, announce_queue=None):
+        got.append(await announce_queue.get())
+        await asyncio.Event().wait()
+
+    async def go():
+        async def on_event(event, writer):
+            pass
+
+        echo, _ = _fake_echo(on_event)
+        server = await asyncio.start_server(echo, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        surface = asyncio.create_task(talk_echo.serve("127.0.0.1", port, runner=session))
+        try:
+            await asyncio.sleep(0.2)
+            answer = await asyncio.to_thread(talk_echo.send_say, "the  laundry\nis done")
+            for _ in range(100):
+                if got:
+                    break
+                await asyncio.sleep(0.01)
+        finally:
+            surface.cancel()
+            await asyncio.gather(surface, return_exceptions=True)
+            server.close()
+        return answer
+
+    assert asyncio.run(go()) == "ok"
+    assert len(got) == 1
+    assert any("the laundry is done" in getattr(c, "text", "") for c in got[0])
+
+
+def test_end_call_waits_for_the_goodbye_then_hangs_up():
+    clock = Clock()
+    audio = EchoAudio(lambda _: None, clock=clock)
+    assert not audio.hung_up()
+    audio.request_hang_up()
+    audio.queue_playback(_ms(4000), "bye")
+    audio.pace_once()
+    clock.now += talk_echo.HANG_UP_MIN_S
+    assert not audio.hung_up(), "the goodbye is still playing"
+    audio.drain_playback()
+    clock.now += talk_echo.PLAYBACK_LEAD_S + talk_echo.ECHO_TAIL_S
+    assert audio.hung_up()
+
+
+def test_end_call_never_waits_past_its_bound_even_if_the_model_keeps_talking():
+    clock = Clock()
+    audio = EchoAudio(lambda _: None, clock=clock)
+    audio.request_hang_up()
+    audio.queue_playback(_ms(20_000), "rambling")
+    clock.now += talk_echo.HANG_UP_MAX_S
+    assert audio.hung_up()
+
+
+def test_end_call_without_a_call_says_so():
+    assert "no call" in talk_echo.run_end_call({})
+
+
+def test_end_call_is_offered_only_to_a_surface_that_can_hang_up():
+    import talk_operator_auth
+    import talk_tools
+
+    def names(**kw):
+        return [t["name"] for t in talk_tools.default_talk_tools(**kw)]
+
+    assert "end_call" in names(hangable=True)
+    assert "end_call" not in names()
+    assert talk_tools._HANDLERS["end_call"] is talk_echo.run_end_call
+    assert "end_call" in talk_operator_auth.READ_ONLY_TALK_TOOLS

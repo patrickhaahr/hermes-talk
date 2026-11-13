@@ -9,19 +9,28 @@ spell, and the Echo goes back to waiting for its wake word.
 
 Duplex needs hassmic to keep streaming the microphone while it speaks; stock
 hassmic stops it at the first reply, which leaves one exchange per wake word.
+
+Between calls one session waits connected (standby), so a wake word starts
+talking to a live model instead of spending a mint and a connect (~1.3 s, ~3 s
+in a cold process) while the operator is already speaking. Whatever that
+standby session says on its own (a background result that landed, or
+``hermes talk echo-say``) makes it the call: the Echo speaks first.
 """
 
 from __future__ import annotations
 
 import array
 import asyncio
+import contextlib
 import json
 import logging
+import os
 import threading
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 try:
@@ -69,6 +78,21 @@ MAX_PAYLOAD_BYTES = 1 << 20
 
 #: Ends a run without the error animation (hassmic: core_no_speech).
 QUIET_END_CODE = "stt-no-text-recognized"
+
+#: A standby session is replaced after this long: provider sessions are
+#: capped (OpenAI Realtime at 60 min), and results that landed while nothing
+#: listened are claimed when a session starts.
+STANDBY_REFRESH_S = 15 * 60
+STANDBY_RETRY_MIN_S = 2.0
+STANDBY_RETRY_MAX_S = 60.0
+#: After end_call, the goodbye still has to be generated and played: the call
+#: closes once the Echo has been silent for a moment, never sooner than this.
+HANG_UP_MIN_S = 2.5
+HANG_UP_MAX_S = 10.0
+#: ``hermes talk echo-say`` reaches the running surface through this socket,
+#: under the Hermes home (only its owner may connect).
+SAY_SOCKET = "talk-echo.sock"
+MAX_SAY_CHARS = 1_000
 
 
 # -- Wyoming framing ------------------------------------------------------------
@@ -189,9 +213,12 @@ class EchoAudio:
         *,
         clock: Callable[[], float] = time.monotonic,
         barge_in_level: float = DEFAULT_BARGE_IN_LEVEL,
+        on_speech: Callable[[], None] | None = None,
     ) -> None:
         self._write = write
         self._clock = clock
+        self._on_speech = on_speech
+        self._hang_up_at: float | None = None
         self._barge_in_level = barge_in_level
         self._levels: dict[bool, list[float]] = {True: [], False: []}
         self._gated = 0
@@ -278,6 +305,26 @@ class EchoAudio:
                 f"otherwise: {summary(self._levels[False])}"
             )
 
+    def mark_activity(self) -> None:
+        self._last_activity = self._clock()
+
+    def request_hang_up(self) -> None:
+        if self._hang_up_at is None:
+            self._hang_up_at = self._clock()
+
+    def hung_up(self) -> bool:
+        """end_call was asked for, and the goodbye has been said (or never came)."""
+
+        if self._hang_up_at is None:
+            return False
+        waited = self._clock() - self._hang_up_at
+        with self._lock:
+            silent = (
+                self._queued_playback_bytes == 0
+                and self._sent_until + ECHO_TAIL_S <= self._clock()
+            )
+        return waited >= HANG_UP_MAX_S or (waited >= HANG_UP_MIN_S and silent)
+
     def quiet_s(self) -> float:
         """Seconds since anyone spoke, the Echo included."""
 
@@ -310,6 +357,8 @@ class EchoAudio:
             begin = not self._started_reply
             self._started_reply = True
         if begin:
+            if self._on_speech is not None:
+                self._on_speech()
             self._write(encode_event("audio-start", {"rate": RATE, "width": 2, "channels": 1}))
         self._write(encode_event("audio-chunk", {"rate": RATE, "width": 2, "channels": 1}, chunk))
 
@@ -422,25 +471,62 @@ SessionRunner = Callable[..., Awaitable[int]]
 
 
 class _Conversation:
-    """One wake word's Talk session, from the wake word until it goes quiet."""
+    """One Talk session on the Echo: connected on standby, then the call.
+
+    A standby session hears nothing (hassmic streams the microphone only
+    during a run) and says nothing unless it has something to tell. It becomes
+    the call at the wake word (:meth:`activate`) or when it starts speaking on
+    its own, and then ends after a quiet spell or ``end_call``. A standby that
+    is never woken is replaced every :data:`STANDBY_REFRESH_S`.
+    """
 
     def __init__(
         self,
         write: Callable[[bytes], None],
         runner: SessionRunner,
         idle_s: float,
-        on_end: Callable[[_Conversation], None],
+        on_end: Callable[[_Conversation, bool], None],
         barge_in_level: float = DEFAULT_BARGE_IN_LEVEL,
+        *,
+        active: bool = True,
     ) -> None:
-        self.audio = EchoAudio(write, barge_in_level=barge_in_level)
+        self.audio = EchoAudio(write, barge_in_level=barge_in_level, on_speech=self.activate)
+        self.announcements: asyncio.Queue = asyncio.Queue()
+        self.active = False
         self._write = write
         self._idle_s = idle_s
         self._on_end = on_end
-        self._session = asyncio.get_running_loop().create_task(runner(audio=self.audio, lane=LANE))
-        self._watch = asyncio.get_running_loop().create_task(self._watch_quiet())
+        self._closed = False
+        loop = asyncio.get_running_loop()
+        self._session = loop.create_task(
+            runner(audio=self.audio, lane=LANE, announce_queue=self.announcements)
+        )
+        self._watch = loop.create_task(self._watch_session())
+        if active:
+            self.activate()
 
-    async def _watch_quiet(self) -> None:
-        while not self._session.done() and self.audio.quiet_s() < self._idle_s:
+    def activate(self) -> None:
+        global _calling
+        if self.active:
+            return
+        self.active = True
+        self.audio.mark_activity()
+        _calling = self.audio
+        _log.info("echo: call started")
+
+    async def _watch_session(self) -> None:
+        loop = asyncio.get_running_loop()
+        born = loop.time()
+        while not self._session.done():
+            if self.active:
+                if self.audio.hung_up():
+                    _log.info("echo: end_call, ending the session")
+                    break
+                if self.audio.quiet_s() >= self._idle_s:
+                    _log.info("echo: quiet for %.0f s, ending the session", self._idle_s)
+                    break
+            elif loop.time() - born >= STANDBY_REFRESH_S:
+                break
             await asyncio.sleep(0.25)
         failed = False
         if self._session.done():
@@ -451,21 +537,70 @@ class _Conversation:
             )
             if failed:
                 _log.warning("echo: the Talk session ended unsuccessfully")
-        else:
-            _log.info("echo: quiet for %.0f s, ending the session", self._idle_s)
         await self.close(failed=failed)
 
     async def close(self, *, failed: bool = False, notify_echo: bool = True) -> None:
-        self._on_end(self)
+        global _calling
+        if self._closed:
+            return
+        self._closed = True
+        if _calling is self.audio:
+            _calling = None
+        self._on_end(self, failed)
         if not self._session.done():
             self._session.cancel()
         await asyncio.gather(self._session, return_exceptions=True)
         self.audio.stop()
-        _log.info("echo: %s", self.audio.level_report())
-        if notify_echo:
-            self._write(self.audio.end_event(failed=failed))
+        if self.active:
+            _log.info("echo: %s", self.audio.level_report())
+            if notify_echo:
+                self._write(self.audio.end_event(failed=failed))
         if asyncio.current_task() is not self._watch:
             self._watch.cancel()
+
+
+#: The call's audio while one is live: where end_call lands.
+_calling: EchoAudio | None = None
+
+END_CALL_TOOL: dict = {
+    "type": "function",
+    "name": "end_call",
+    "description": (
+        "Hang up this call on the Echo. Use it when the operator says goodbye, "
+        "says that is all, or asks you to stop listening. Say a short goodbye "
+        "first, in the same turn; the call closes once it has been heard."
+    ),
+    "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+}
+
+
+def run_end_call(arguments: dict) -> str:
+    audio = _calling
+    if audio is None:
+        return "There is no call on the Echo to end."
+    audio.request_hang_up()
+    return "Hanging up after your goodbye. Say nothing more than the goodbye."
+
+
+def say_commands(text: str) -> list:
+    """What makes the session speak a message Hermes asked it to deliver."""
+
+    try:
+        from . import talk_cli
+    except ImportError:  # pragma: no cover - flat-module fallback
+        import talk_cli
+    return talk_cli._announcement_commands(
+        "Hermes asked you to say this to the operator, unprompted, through the Echo.",
+        text,
+    )
+
+
+def say_socket_path() -> Path:
+    try:
+        from . import talk_config
+    except ImportError:  # pragma: no cover - flat-module fallback
+        import talk_config
+    return Path(talk_config.get_hermes_home()) / SAY_SOCKET
 
 
 async def _linked(
@@ -474,38 +609,116 @@ async def _linked(
     runner: SessionRunner,
     idle_s: float,
     barge_in_level: float,
+    say_queue: asyncio.Queue | None = None,
 ) -> None:
-    """Drive one connection to the Echo until it closes."""
+    """Drive one connection to the Echo until it closes.
 
-    conversation: _Conversation | None = None
+    One session at a time: the standby, or the call it became.
+    """
 
-    def ended(c: _Conversation) -> None:
-        nonlocal conversation
-        if conversation is c:
-            conversation = None
+    loop = asyncio.get_running_loop()
+    current: _Conversation | None = None
+    retry_s = STANDBY_RETRY_MIN_S
+    restart: asyncio.TimerHandle | None = None
+
+    def standby() -> None:
+        nonlocal current
+        if current is None:
+            current = _Conversation(
+                writer.write, runner, idle_s, ended, barge_in_level, active=False
+            )
+
+    def ended(c: _Conversation, failed: bool) -> None:
+        nonlocal current, retry_s, restart
+        if current is not c:
+            return
+        current = None
+        if failed and not c.active:
+            delay, retry_s = retry_s, min(retry_s * 2, STANDBY_RETRY_MAX_S)
+        else:
+            delay, retry_s = 0.5, STANDBY_RETRY_MIN_S
+        restart = loop.call_later(delay, standby)
+
+    async def forward_says() -> None:
+        while True:
+            text = await say_queue.get()
+            if current is None:
+                standby()
+            current.activate()
+            current.announcements.put_nowait(say_commands(text))
 
     writer.write(encode_event("describe"))
     writer.write(encode_event("run-satellite"))
     await writer.drain()
+    standby()
+    says = loop.create_task(forward_says()) if say_queue is not None else None
     try:
         while (event := await read_event(reader)) is not None:
             if event.type == "audio-chunk":
-                if conversation is not None:
-                    conversation.audio.feed_microphone(event.payload)
+                if current is not None and current.active:
+                    current.audio.feed_microphone(event.payload)
             elif event.type == "run-pipeline":
-                if conversation is None:
+                if current is None:
                     _log.info("echo: wake word, starting a Talk session")
-                    conversation = _Conversation(
-                        writer.write, runner, idle_s, ended, barge_in_level
-                    )
+                    current = _Conversation(writer.write, runner, idle_s, ended, barge_in_level)
+                elif not current.active:
+                    _log.info("echo: wake word, the standby session takes the call")
+                    current.activate()
             elif event.type == "ping":
                 writer.write(encode_event("pong"))
             elif event.type == "info":
                 name = (event.data.get("satellite") or {}).get("name")
                 _log.info("echo: linked to %s", name or "an unnamed satellite")
     finally:
-        if conversation is not None:
-            await conversation.close(notify_echo=False)
+        if says is not None:
+            says.cancel()
+        if restart is not None:
+            restart.cancel()
+        if current is not None:
+            await current.close(notify_echo=False)
+
+
+async def _serve_says(queue: asyncio.Queue) -> asyncio.AbstractServer | None:
+    """Accept ``hermes talk echo-say`` messages: one UTF-8 line per connection."""
+
+    path = say_socket_path()
+
+    async def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            line = await asyncio.wait_for(reader.readline(), 5.0)
+            text = line.decode("utf-8", "replace").strip()[:MAX_SAY_CHARS]
+            if text:
+                queue.put_nowait(text)
+                writer.write(b"ok\n")
+            else:
+                writer.write(b"empty\n")
+            await writer.drain()
+        except (OSError, TimeoutError):
+            pass
+        finally:
+            writer.close()
+
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+    try:
+        server = await asyncio.start_unix_server(accept, path=str(path))
+    except OSError as exc:
+        _log.warning("echo: no echo-say socket at %s (%s)", path, exc)
+        return None
+    os.chmod(path, 0o600)
+    return server
+
+
+def send_say(text: str) -> str:
+    """``hermes talk echo-say TEXT``: hand a message to the running Echo surface."""
+
+    import socket
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(5.0)
+        sock.connect(str(say_socket_path()))
+        sock.sendall(" ".join(text.split()).encode() + b"\n")
+        return sock.recv(64).decode().strip()
 
 
 async def serve(
@@ -524,6 +737,16 @@ async def serve(
         except ImportError:  # pragma: no cover - flat-module fallback
             import talk_cli
         runner = talk_cli.run_talk_session
+    say_queue: asyncio.Queue = asyncio.Queue()
+    says = await _serve_says(say_queue)
+    try:
+        await _stay_linked(host, port, runner, idle_s, barge_in_level, say_queue)
+    finally:
+        if says is not None:
+            says.close()
+
+
+async def _stay_linked(host, port, runner, idle_s, barge_in_level, say_queue) -> None:
     delay = RECONNECT_MIN_S
     while True:
         try:
@@ -537,7 +760,7 @@ async def serve(
         else:
             delay = RECONNECT_MIN_S
             try:
-                await _linked(reader, writer, runner, idle_s, barge_in_level)
+                await _linked(reader, writer, runner, idle_s, barge_in_level, say_queue)
                 _log.warning("echo: %s:%d closed the connection", host, port)
             except (OSError, WyomingError) as exc:
                 _log.warning("echo: link to %s:%d lost (%s)", host, port, exc)
@@ -573,6 +796,7 @@ def cli_entry(
 __all__ = [
     "DEFAULT_IDLE_S",
     "DEFAULT_PORT",
+    "END_CALL_TOOL",
     "LANE",
     "EchoAudio",
     "Upsampler",
@@ -581,5 +805,7 @@ __all__ = [
     "cli_entry",
     "encode_event",
     "read_event",
+    "run_end_call",
+    "send_say",
     "serve",
 ]

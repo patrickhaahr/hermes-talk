@@ -35,6 +35,7 @@ try:
         talk_config,
         talk_core_realtime,
         talk_doctor,
+        talk_echo,
         talk_home,
         talk_host,
         talk_identity,
@@ -51,6 +52,7 @@ except ImportError:  # pragma: no cover - flat-module fallback (Hermes file-path
     import talk_config
     import talk_core_realtime
     import talk_doctor
+    import talk_echo
     import talk_home
     import talk_host
     import talk_identity
@@ -439,7 +441,7 @@ def plugin_version() -> str:
         return "unknown"
 
 
-def default_talk_tools(*, pausable: bool = False) -> list[dict]:
+def default_talk_tools(*, pausable: bool = False, hangable: bool = False) -> list[dict]:
     """The tool set advertised to a new Talk session (fresh copies per call).
 
     The base set is unconditional. ``search_vault`` is CONDITIONAL: it is
@@ -452,7 +454,8 @@ def default_talk_tools(*, pausable: bool = False) -> list[dict]:
     or ``/talk resume``). Default False — the dashboard tab's microphone
     lives in the browser, and a terminal whose stdin is not a tty has no key
     to press — so a pause tool is never offered where the only way back
-    would be Ctrl+C.
+    would be Ctrl+C. ``end_call`` rides on ``hangable``: only a surface that
+    can close its own call (the Echo) offers it.
     """
 
     tools = [
@@ -469,6 +472,8 @@ def default_talk_tools(*, pausable: bool = False) -> list[dict]:
     ]
     if pausable:
         tools.append(_TOOL_PAUSE_VOICE_INPUT)
+    if hangable:
+        tools.append(talk_echo.END_CALL_TOOL)
     if talk_home.available():
         tools.insert(1, talk_home.TOOL)
     try:
@@ -873,6 +878,7 @@ def _handle_talk_capabilities(arguments: dict) -> str:
 
 _HANDLERS = {
     "home_control": talk_home.run,
+    "end_call": talk_echo.run_end_call,
     "search_memory": _handle_search_memory,
     "search_vault": _handle_search_vault,
     "delegate_task": _handle_delegate_task,

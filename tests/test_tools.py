@@ -138,6 +138,7 @@ def test_no_handler_is_orphaned():
     advertised.add("search_vault")  # conditional, absent when unservable
     advertised.add("pause_voice_input")  # conditional, absent without a way to resume
     advertised.add("home_control")  # conditional, absent without the openhome CLI
+    advertised.add("end_call")  # conditional, only where the surface can hang up
 
     assert set(talk_tools._HANDLERS) == advertised
 
