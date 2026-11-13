@@ -27,6 +27,7 @@ import logging
 import os
 import threading
 import time
+import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -583,16 +584,28 @@ def run_end_call(arguments: dict) -> str:
 
 
 def say_commands(text: str) -> list:
-    """What makes the session speak a message Hermes asked it to deliver."""
+    """What makes the session speak a message Hermes asked it to deliver.
+
+    Unlike a background result this is no untrusted data: only the Hermes
+    user can reach the socket. So it is an instruction to say the words as
+    they are, not a report to sum up, which the model answered with a
+    generic "what would you like help with?" instead of the message.
+    """
 
     try:
-        from . import talk_cli
+        from . import talk_realtime
     except ImportError:  # pragma: no cover - flat-module fallback
-        import talk_cli
-    return talk_cli._announcement_commands(
-        "Hermes asked you to say this to the operator, unprompted, through the Echo.",
-        text,
-    )
+        import talk_realtime
+    item_id = f"talksay{uuid.uuid4().hex[:20]}"
+    return [
+        talk_realtime.AddContext(
+            item_id=item_id,
+            text=f"Hermes has a message for the operator. Say exactly this, word for word, "
+            f"and nothing else: {text}",
+        ),
+        talk_realtime.StartResponse(allow_tools=False),
+        talk_realtime.RemoveContext(item_id=item_id),
+    ]
 
 
 def say_socket_path() -> Path:
