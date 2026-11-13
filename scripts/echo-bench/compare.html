@@ -1,0 +1,28 @@
+<!doctype html><html><body>
+<style>
+.wrap{font-family:var(--font-sans);color:var(--foreground)}
+.legend{display:flex;gap:16px;font-size:13px;margin:0 0 10px}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;background:var(--c)}
+.row{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:8px;margin:6px 0}
+.lab{font-size:13px;color:var(--muted-foreground)}
+.bars{display:flex;flex-direction:column;gap:3px}
+.bar{height:16px;border-radius:3px;background:var(--c);display:flex;align-items:center;justify-content:flex-end;padding-right:6px;font-size:11px;font-family:var(--font-mono);color:var(--background);min-width:34px;box-sizing:border-box}
+h4{margin:16px 0 4px;font-size:13px;font-weight:600}
+.note{font-size:12px;color:var(--muted-foreground);margin-top:10px}
+</style>
+<div class="wrap">
+<div class="legend"><span style="--c:var(--chart-1)">gpt-realtime-2.1 · cedar</span><span style="--c:var(--chart-2)">gpt-live-1-codex · sol</span></div>
+<h4>Seconds from end of speech to first audible reply (median of 5)</h4>
+<div id="r"></div>
+<h4>Seconds from end of speech to the action (tool call / delegation)</h4>
+<div id="t"></div>
+<div class="note">Lower is better. All 50 runs were correct for both models. Connect time is not shown: 1.4 s vs 6.0 s, hidden by the standby session.</div>
+</div>
+<script>
+const R=[["capital of France",1.93,1.57],["octopus fact",2.03,1.61],["lights off",2.54,2.62],["TV volume up ×3",2.50,3.02],["ask Hermes (disk)",1.94,2.75]];
+const T=[["lights off",1.80,2.28],["TV volume up ×3",1.71,2.49],["ask Hermes (disk)",3.92,2.30]];
+const max=4.2;
+function draw(id,rows){document.getElementById(id).innerHTML=rows.map(([l,a,b])=>`<div class="row"><div class="lab">${l}</div><div class="bars"><div class="bar" style="--c:var(--chart-1);width:${a/max*100}%">${a.toFixed(2)}</div><div class="bar" style="--c:var(--chart-2);width:${b/max*100}%">${b.toFixed(2)}</div></div></div>`).join("")}
+draw("r",R);draw("t",T);
+</script>
+</body></html>

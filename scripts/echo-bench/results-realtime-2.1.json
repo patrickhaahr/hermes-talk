@@ -1,0 +1,367 @@
+[
+ {
+  "id": "chat",
+  "connect_s": 3.6,
+  "response_s": 1.675,
+  "tool_s": null,
+  "tool": null,
+  "ok": true,
+  "said": "Paris.",
+  "run": 0
+ },
+ {
+  "id": "fact",
+  "connect_s": 1.384,
+  "response_s": 2.031,
+  "tool_s": null,
+  "tool": null,
+  "ok": true,
+  "said": "Octopuses have three hearts, and two of them stop beating when they swim, which is one reason they often prefer to crawl instead of cruise.",
+  "run": 0
+ },
+ {
+  "id": "lights",
+  "connect_s": 1.377,
+  "response_s": 2.432,
+  "tool_s": 1.679,
+  "tool": [
+   "home_control",
+   {
+    "device": "lights",
+    "command": "off"
+   }
+  ],
+  "ok": true,
+  "said": "Done.",
+  "run": 0
+ },
+ {
+  "id": "tvvol",
+  "connect_s": 1.342,
+  "response_s": 2.441,
+  "tool_s": 1.71,
+  "tool": [
+   "home_control",
+   {
+    "device": "tv",
+    "command": "volume-up",
+    "repeat": 3
+   }
+  ],
+  "ok": true,
+  "said": "Done.",
+  "run": 0
+ },
+ {
+  "id": "delegate",
+  "connect_s": 1.386,
+  "response_s": 1.898,
+  "tool_s": 3.663,
+  "tool": [
+   "delegate_task",
+   {
+    "task": "Check free disk space on the host named zaza. Use a reliable system command, such as `df -h` for all mounted filesystems, and include overall totals and any notable low-space mounts. Return a concise summary of free space and usage, and note any filesystem under 15% free. No changes should be made.",
+    "background": true,
+    "execution_mode": "exclusive",
+    "resource_keys": [
+     "host:zaza"
+    ]
+   }
+  ],
+  "ok": true,
+  "said": "Okay, I\u2019ll set that up and let you know when it\u2019s running. It\u2019s running in the background now, and I\u2019ll report back once the result comes in.",
+  "run": 0
+ },
+ {
+  "id": "chat",
+  "connect_s": 1.371,
+  "response_s": 1.56,
+  "tool_s": null,
+  "tool": null,
+  "ok": true,
+  "said": "Paris.",
+  "run": 1
+ },
+ {
+  "id": "fact",
+  "connect_s": 1.389,
+  "response_s": 2.025,
+  "tool_s": null,
+  "tool": null,
+  "ok": true,
+  "said": "Octopuses have three hearts, and two of them stop beating when they swim. They\u2019re also famous escape artists, squeezing through surprisingly tiny gaps if their ",
+  "run": 1
+ },
+ {
+  "id": "lights",
+  "connect_s": 1.246,
+  "response_s": 2.388,
+  "tool_s": 1.638,
+  "tool": [
+   "home_control",
+   {
+    "device": "lights",
+    "command": "off"
+   }
+  ],
+  "ok": true,
+  "said": "Done.",
+  "run": 1
+ },
+ {
+  "id": "tvvol",
+  "connect_s": 1.286,
+  "response_s": 2.484,
+  "tool_s": 1.803,
+  "tool": [
+   "home_control",
+   {
+    "device": "tv",
+    "command": "volume-up",
+    "repeat": 3
+   }
+  ],
+  "ok": true,
+  "said": "Done.",
+  "run": 1
+ },
+ {
+  "id": "delegate",
+  "connect_s": 1.332,
+  "response_s": 1.913,
+  "tool_s": 3.522,
+  "tool": [
+   "delegate_task",
+   {
+    "task": "Check free disk space on the host named zaza. Use available system tools to report total, used, and available space for the main filesystems, including the root filesystem. Output a concise summary suitable for reading aloud, and note any filesystems that are near capacity (over 85%).",
+    "background": true,
+    "execution_mode": "exclusive",
+    "resource_keys": [
+     "host:zaza"
+    ]
+   }
+  ],
+  "ok": true,
+  "said": "One moment, I\u2019ll hand that off to an agent to check. It\u2019s running and will report back with a short summary when it finishes.",
+  "run": 1
+ },
+ {
+  "id": "chat",
+  "connect_s": 1.479,
+  "response_s": 1.927,
+  "tool_s": null,
+  "tool": null,
+  "ok": true,
+  "said": "Paris.",
+  "run": 2
+ },
+ {
+  "id": "fact",
+  "connect_s": 1.339,
+  "response_s": 2.61,
+  "tool_s": null,
+  "tool": null,
+  "ok": true,
+  "said": "Octopuses have three hearts, and their blood is blue because it uses copper instead of iron to carry oxygen. Pretty stylish biology, honestly.",
+  "run": 2
+ },
+ {
+  "id": "lights",
+  "connect_s": 1.337,
+  "response_s": 2.935,
+  "tool_s": 1.808,
+  "tool": [
+   "home_control",
+   {
+    "device": "lights",
+    "command": "off"
+   }
+  ],
+  "ok": true,
+  "said": "Done.",
+  "run": 2
+ },
+ {
+  "id": "tvvol",
+  "connect_s": 1.415,
+  "response_s": 2.673,
+  "tool_s": 1.795,
+  "tool": [
+   "home_control",
+   {
+    "device": "tv",
+    "command": "volume-up",
+    "repeat": 3
+   }
+  ],
+  "ok": true,
+  "said": "Done.",
+  "run": 2
+ },
+ {
+  "id": "delegate",
+  "connect_s": 1.159,
+  "response_s": 1.94,
+  "tool_s": 4.164,
+  "tool": [
+   "delegate_task",
+   {
+    "task": "Check free disk space on the host named zaza. Use terminal commands to report total, used, and available space for the main filesystem(s), including the root filesystem. If multiple relevant mount points exist, list each with its mount path. Provide the output in a short human-readable summary. No changes should be made to the system. Return the results and any notable warnings if disk usage is high.",
+    "background": true,
+    "execution_mode": "exclusive",
+    "resource_keys": [
+     "host:zaza"
+    ]
+   }
+  ],
+  "ok": true,
+  "said": "Okay, I\u2019ll queue up a quick background check for that and let you know when it comes back. It\u2019s running and will return a short summary once it finishes.",
+  "run": 2
+ },
+ {
+  "id": "chat",
+  "connect_s": 1.446,
+  "response_s": 2.422,
+  "tool_s": null,
+  "tool": null,
+  "ok": true,
+  "said": "Paris.",
+  "run": 3
+ },
+ {
+  "id": "fact",
+  "connect_s": 1.239,
+  "response_s": 2.249,
+  "tool_s": null,
+  "tool": null,
+  "ok": true,
+  "said": "An octopus has three hearts, blue-ish blood, and it can taste with its suckers, which is a pretty wild way to explore the world.",
+  "run": 3
+ },
+ {
+  "id": "lights",
+  "connect_s": 1.446,
+  "response_s": 2.601,
+  "tool_s": 1.969,
+  "tool": [
+   "home_control",
+   {
+    "device": "lights",
+    "command": "off"
+   }
+  ],
+  "ok": true,
+  "said": "Done.",
+  "run": 3
+ },
+ {
+  "id": "tvvol",
+  "connect_s": 1.3,
+  "response_s": 2.502,
+  "tool_s": 1.705,
+  "tool": [
+   "home_control",
+   {
+    "device": "tv",
+    "command": "volume-up",
+    "repeat": 3
+   }
+  ],
+  "ok": true,
+  "said": "Done.",
+  "run": 3
+ },
+ {
+  "id": "delegate",
+  "connect_s": 1.485,
+  "response_s": 2.245,
+  "tool_s": 4.297,
+  "tool": [
+   "delegate_task",
+   {
+    "task": "Check free disk space on the host named zaza. Use appropriate remote access available in the Hermes environment to query filesystem usage and report total, used, and available space, plus the mount points. If multiple filesystems exist, include the root filesystem and any data volumes. Output a concise summary suitable to read aloud, and note any filesystem that is near capacity (for example, above 85% used).",
+    "background": true,
+    "execution_mode": "exclusive",
+    "resource_keys": [
+     "host:zaza"
+    ]
+   }
+  ],
+  "ok": true,
+  "said": "One moment, I\u2019ll set up a quick check and let you know what it finds. It\u2019s running in the background, and I\u2019ll summarize the disk space once the check finishes.",
+  "run": 3
+ },
+ {
+  "id": "chat",
+  "connect_s": 1.309,
+  "response_s": 2.767,
+  "tool_s": null,
+  "tool": null,
+  "ok": true,
+  "said": "Paris.",
+  "run": 4
+ },
+ {
+  "id": "fact",
+  "connect_s": 1.415,
+  "response_s": 1.808,
+  "tool_s": null,
+  "tool": null,
+  "ok": true,
+  "said": "Octopuses have three hearts, and two of them actually stop beating when they swim.",
+  "run": 4
+ },
+ {
+  "id": "lights",
+  "connect_s": 1.313,
+  "response_s": 2.538,
+  "tool_s": 1.799,
+  "tool": [
+   "home_control",
+   {
+    "device": "lights",
+    "command": "off"
+   }
+  ],
+  "ok": true,
+  "said": "Done.",
+  "run": 4
+ },
+ {
+  "id": "tvvol",
+  "connect_s": 1.432,
+  "response_s": 2.652,
+  "tool_s": 1.672,
+  "tool": [
+   "home_control",
+   {
+    "device": "tv",
+    "command": "volume-up",
+    "repeat": 3
+   }
+  ],
+  "ok": true,
+  "said": "Done.",
+  "run": 4
+ },
+ {
+  "id": "delegate",
+  "connect_s": 1.335,
+  "response_s": 2.063,
+  "tool_s": 3.923,
+  "tool": [
+   "delegate_task",
+   {
+    "task": "Check available disk space on the host named zaza. Use a safe read-only command (for example, df -h for all mounted filesystems) and report the free space and usage summary, highlighting the primary filesystem. Do not change any configuration. Return a short summary of the results and note any filesystems that look near full.",
+    "background": true,
+    "execution_mode": "parallel_read_only",
+    "resource_keys": [
+     "zaza"
+    ]
+   }
+  ],
+  "ok": true,
+  "said": "Alright, I\u2019ll hand this off to an agent to check zaza\u2019s free space. It\u2019s running and will report back with a short summary of free space and any filesystems tha",
+  "run": 4
+ }
+]

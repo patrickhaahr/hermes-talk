@@ -1,0 +1,7 @@
+[
+ {"id": "chat",     "kind": "answer", "say": "Hey, what's the capital of France?"},
+ {"id": "fact",     "kind": "answer", "say": "Tell me one fun fact about octopuses."},
+ {"id": "lights",   "kind": "home",   "say": "Turn off the lights.", "expect": {"device": "lights", "command": "off"}},
+ {"id": "tvvol",    "kind": "home",   "say": "Turn the TV volume up three steps.", "expect": {"device": "tv", "command": "volume-up"}},
+ {"id": "delegate", "kind": "delegate", "say": "Ask Hermes to check how much disk space is free on zaza."}
+]
