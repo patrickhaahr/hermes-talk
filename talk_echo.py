@@ -589,8 +589,8 @@ END_CALL_TOOL: dict = {
     "name": "end_call",
     "description": (
         "Hang up this call on the Echo. Use it when the operator says goodbye, "
-        "says that is all, or asks you to stop listening. Say a short goodbye "
-        "first, in the same turn; the call closes once it has been heard."
+        "says that is all, or asks you to stop listening. Say only 'Bye.' first, in "
+        "the same turn; nothing is said after it, and the call closes once it is heard."
     ),
     "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
 }
@@ -604,12 +604,15 @@ def note_action(what: str) -> None:
                   what[:120], _calling.since_spoke())
 
 
+HANGING_UP = "Hanging up after your goodbye."
+
+
 def run_end_call(arguments: dict) -> str:
     audio = _calling
     if audio is None:
         return "There is no call on the Echo to end."
     audio.request_hang_up()
-    return "Hanging up after your goodbye. Say nothing more than the goodbye."
+    return HANGING_UP
 
 
 def clock_commands() -> list:

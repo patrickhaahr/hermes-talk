@@ -53,7 +53,6 @@ try:
         talk_gemini_realtime,
         talk_grok_auth,
         talk_grok_realtime,
-        talk_home,
         talk_host,
         talk_identity,
         talk_lifecycle,
@@ -85,7 +84,6 @@ except ImportError:  # pragma: no cover - flat-module fallback (Hermes file-path
     import talk_gemini_realtime
     import talk_grok_auth
     import talk_grok_realtime
-    import talk_home
     import talk_host
     import talk_identity
     import talk_lifecycle
@@ -394,19 +392,24 @@ class ToolResponseCoordinator:
             metadata=metadata if isinstance(metadata, dict) else {}
         )
 
-    def _carried_out_silently(self, batch: list) -> bool:
-        """A response that only ran home commands, all of which worked, needs no reply.
+    def _carried_out_silently(self) -> bool:
+        """Whether every result in this response leaves nothing to say.
 
-        The operator hears the lights go off; a spoken "Done." after it is
-        noise. A failure still gets its continuation, so it is said out loud.
+        A spoken "Done." after the lights visibly go off, or a second goodbye
+        after the hang-up, is noise. A failure still gets its continuation.
         """
 
-        results = [m for m in batch if isinstance(m, talk_realtime.SubmitToolResult)]
+        results = [
+            (name, message.output)
+            for name, result in zip(self._names, self.outputs, strict=True)
+            for message in result or []
+            if isinstance(message, talk_realtime.SubmitToolResult)
+        ]
         return (
             self.provider_neutral
+            and len(results) == len(self._names)
             and bool(results)
-            and all(name == talk_home.TOOL["name"] for name in self._names)
-            and all(talk_home.worked(result.output) for result in results)
+            and all(talk_tools.ends_quietly(name, output) for name, output in results)
         )
 
     def admit(self, event: dict) -> bool:
@@ -476,7 +479,7 @@ class ToolResponseCoordinator:
             ):
                 return
             batch = [message for result in self.outputs for message in result or []]
-            if not self._carried_out_silently(batch):
+            if not self._carried_out_silently():
                 batch.append(self._continuation)
             try:
                 await self.send_batch(batch)

@@ -16,6 +16,7 @@ import pytest
 import talk_audio
 import talk_capabilities
 import talk_cli
+import talk_echo
 import talk_host
 import talk_identity
 import talk_operator_auth
@@ -911,9 +912,13 @@ def test_tool_batch_orders_two_outputs_and_continues_once_after_response_done():
         ([("home_control", "lights off failed: no route")], True),
         ([("home_control", "done: lights off"), ("check_work", "run 3 done")], True),
         ([("check_work", "done: nothing running")], True),
+        ([("end_call", talk_echo.HANGING_UP)], False),
+        ([("end_call", "There is no call on the Echo to end.")], True),
     ],
 )
-def test_only_a_batch_of_home_commands_that_all_worked_ends_without_a_reply(calls, spoken):
+def test_a_batch_that_needs_no_reply_ends_without_one(calls, spoken):
+    """Home commands that all worked, or a hang-up after the goodbye: nothing more to say."""
+
     async def scenario():
         sent: list = []
         outputs = dict((f"call_{i}", out) for i, (_name, out) in enumerate(calls))

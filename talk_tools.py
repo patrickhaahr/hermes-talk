@@ -877,6 +877,21 @@ def _handle_talk_capabilities(arguments: dict) -> str:
     return rendered
 
 
+#: Results that need no spoken reply: the operator sees the lights switch, and
+#: the goodbye was already said before the hang-up.
+_QUIET_RESULTS = {
+    "home_control": talk_home.worked,
+    "end_call": lambda output: output == talk_echo.HANGING_UP,
+}
+
+
+def ends_quietly(name: str, output: str) -> bool:
+    """Whether this tool result leaves the model nothing to say."""
+
+    quiet = _QUIET_RESULTS.get(name)
+    return quiet is not None and quiet(output)
+
+
 _HANDLERS = {
     "home_control": talk_home.run,
     "end_call": talk_echo.run_end_call,
