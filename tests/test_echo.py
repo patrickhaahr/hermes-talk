@@ -307,6 +307,14 @@ def _fake_echo(on_event):
     return echo, received
 
 
+async def _until(predicate):
+    for _ in range(300):
+        if predicate():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition never held")
+
+
 def _wake(writer):
     writer.write(encode_event("run-pipeline", {"start_stage": "asr", "end_stage": "tts"}))
     writer.write(encode_event("audio-chunk", {"rate": 16000}, _pcm([0] * 1024)))
@@ -398,6 +406,48 @@ def test_a_standby_session_that_speaks_on_its_own_becomes_the_call(monkeypatch):
 
     types = asyncio.run(go())
     assert types.index("audio-start") < types.index("audio-stop")
+
+
+def test_a_result_landing_after_the_call_restarts_the_standby_to_pick_it_up(monkeypatch):
+    """A new session adopts owed results when it starts, so the standby restarts for one."""
+
+    monkeypatch.setattr(talk_echo, "STANDBY_REFRESH_S", 60)
+    landed = []
+    monkeypatch.setattr(
+        talk_echo.talk_runs, "owed_since",
+        lambda session_id, since: session_id == talk_echo.RETURN_SESSION_ID and bool(landed),
+    )
+    started: list[int] = []
+
+    async def session(*, audio, lane, announce_queue=None):
+        started.append(1)
+        if len(started) == 2:
+            landed.clear()  # the new standby adopted it
+        audio.start()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            audio.stop()
+
+    async def go():
+        echo, _ = _fake_echo(lambda event, writer: asyncio.sleep(0))
+        server = await asyncio.start_server(echo, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        surface = asyncio.create_task(
+            talk_echo.serve("127.0.0.1", port, idle_s=0.2, runner=session)
+        )
+        try:
+            await _until(lambda: len(started) == 1)
+            landed.append(1)
+            await _until(lambda: len(started) == 2)
+            await asyncio.sleep(0.8)
+        finally:
+            surface.cancel()
+            await asyncio.gather(surface, return_exceptions=True)
+            server.close()
+
+    asyncio.run(go())
+    assert len(started) == 2
 
 
 def test_echo_say_reaches_the_standby_session_as_an_announcement(monkeypatch):

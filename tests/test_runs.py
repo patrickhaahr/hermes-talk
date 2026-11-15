@@ -725,6 +725,25 @@ def test_undelivered_without_a_session_id_claims_nothing():
     assert talk_runs.list_undelivered_for_session("", operator="test", profile=None) == []
 
 
+def test_owed_since_sees_only_results_that_landed_after_the_mark():
+    _attach_test_owner(hermes_session_id="talk-echo")
+    before = talk_runs.start_run("agent", "before", lambda _rid: "done")
+    _wait_terminal(before)
+    mark = time.time()
+    assert not talk_runs.owed_since("talk-echo", mark)
+
+    release = threading.Event()
+    later = talk_runs.start_run("agent", "later", lambda _rid: release.wait(timeout=3.0) and "ok")
+    assert not talk_runs.owed_since("talk-echo", mark)
+    release.set()
+    _wait_terminal(later)
+    assert talk_runs.owed_since("talk-echo", mark)
+    assert not talk_runs.owed_since("sess-other", mark)
+
+    assert talk_runs.claim_delivery(later, claimant="ts-next")
+    assert not talk_runs.owed_since("talk-echo", mark)
+
+
 def test_pre_fix_history_is_never_adopted(history_env: Path):
     """Records written before the ticket existed belong to nobody."""
 

@@ -976,6 +976,28 @@ def test_a_reconnect_speaks_every_result_it_was_owed(routed):
     assert talk_runs.claim_delivery(second, claimant="ts-probe") is False
 
 
+def test_a_surface_with_no_hermes_session_adopts_under_its_return_session_id(routed, monkeypatch):
+    """The Echo has no parent Hermes session; its fixed id is how a later call finds a result."""
+
+    monkeypatch.setattr(talk_cli, "_active_parent_session_id", lambda: None)
+    run_id = _seed_orphaned_run("talk-echo", "nika is healthy")
+
+    fake = FakeProviderSession([rt.SessionReady(session_id="session-1")])
+    asyncio.run(
+        talk_cli.run_talk_session(
+            audio=Audio(), session_factory=lambda _auth: fake, return_session_id="talk-echo"
+        )
+    )
+
+    spoken = " ".join(
+        getattr(command, "text", "")
+        for batch in fake.sent
+        for command in batch
+    )
+    assert "nika is healthy" in spoken
+    assert _delivered_in_history(run_id)
+
+
 def test_a_reconnect_does_not_speak_a_stranger_s_result(routed):
     _seed_orphaned_run("sess-somebody-else", "not yours")
 

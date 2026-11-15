@@ -1145,6 +1145,24 @@ def list_undelivered_for_session(
     return out
 
 
+def owed_since(hermes_session_id: str, since: float) -> bool:
+    """Whether a result for this session id landed after ``since``, still unclaimed.
+
+    A cheap poll for a surface waiting between calls: it reads only this
+    process's runs, which is where that surface's own delegated work runs.
+    Adoption itself still goes through :func:`list_undelivered_for_session`.
+    """
+
+    with _RUN_LOCK:
+        return any(
+            run["status"] in TERMINAL_STATUSES
+            and run.get("delivery") == DELIVERY_PENDING
+            and run["updated"] >= since
+            and (run.get("ticket") or {}).get("hermesSessionId") == hermes_session_id
+            for run in _RUNS.values()
+        )
+
+
 def _report_adoption_tail_falloff(hermes_session_id: str) -> None:
     """Visibility only: count owed results the adoption tail can no longer see.
 
@@ -1415,6 +1433,7 @@ __all__ = [
     "list_undelivered_for_session",
     "mark_delivered",
     "normalize_resource_keys",
+    "owed_since",
     "register_process",
     "release_process",
     "reset_for_tests",

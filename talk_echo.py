@@ -22,6 +22,7 @@ from __future__ import annotations
 import array
 import asyncio
 import contextlib
+import functools
 import json
 import logging
 import os
@@ -35,13 +36,18 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from . import talk_audio
+    from . import talk_audio, talk_runs
 except ImportError:  # pragma: no cover - flat-module fallback (Hermes file-path load)
     import talk_audio
+    import talk_runs
 
 _log = logging.getLogger(__name__)
 
 LANE = "echo"
+#: The Echo has no parent Hermes session. Work it delegates is filed under
+#: this id instead, so the next session adopts a result that lands after the
+#: call that asked for it has ended.
+RETURN_SESSION_ID = "talk-echo"
 DEFAULT_PORT = 16700
 DEFAULT_IDLE_S = 20.0
 
@@ -80,9 +86,9 @@ MAX_PAYLOAD_BYTES = 1 << 20
 #: Ends a run without the error animation (hassmic: core_no_speech).
 QUIET_END_CODE = "stt-no-text-recognized"
 
-#: A standby session is replaced after this long: provider sessions are
-#: capped (OpenAI Realtime at 60 min), and results that landed while nothing
-#: listened are claimed when a session starts.
+#: A standby session is replaced after this long, since provider sessions are
+#: capped (OpenAI Realtime at 60 min). It is also replaced as soon as a result
+#: lands for :data:`RETURN_SESSION_ID`: a session adopts those when it starts.
 STANDBY_REFRESH_S = 15 * 60
 STANDBY_RETRY_MIN_S = 2.0
 STANDBY_RETRY_MAX_S = 60.0
@@ -529,7 +535,7 @@ class _Conversation:
 
     async def _watch_session(self) -> None:
         loop = asyncio.get_running_loop()
-        born = loop.time()
+        born, born_wall = loop.time(), time.time()
         while not self._session.done():
             if self.active:
                 if self.audio.hung_up():
@@ -539,6 +545,9 @@ class _Conversation:
                     _log.info("echo: quiet for %.0f s, ending the session", self._idle_s)
                     break
             elif loop.time() - born >= STANDBY_REFRESH_S:
+                break
+            elif talk_runs.owed_since(RETURN_SESSION_ID, born_wall):
+                _log.info("echo: a background result landed, a new session picks it up")
                 break
             await asyncio.sleep(0.25)
         failed = False
@@ -785,7 +794,11 @@ async def serve(
             import talk_config
             import talk_echo_live
         live = talk_config.voice_mode() == "live"
-        runner = talk_echo_live.run_live_session if live else talk_cli.run_talk_session
+        runner = (
+            talk_echo_live.run_live_session
+            if live
+            else functools.partial(talk_cli.run_talk_session, return_session_id=RETURN_SESSION_ID)
+        )
         _log.info("echo: voice %s", "GPT-Live" if live else "Realtime")
     say_queue: asyncio.Queue = asyncio.Queue()
     says = await _serve_says(say_queue)

@@ -1560,6 +1560,7 @@ async def run_talk_session(
     control_input=None,
     on_native_controller=None,
     announce_queue: asyncio.Queue | None = None,
+    return_session_id: str | None = None,
 ) -> int:
     """Run one voice session. Returns a process exit code.
 
@@ -1592,6 +1593,10 @@ async def run_talk_session(
 
     ``announce_queue`` lets the surface hand the session things to say on
     its own (the Echo's ``echo-say``); it is the queue background results use.
+
+    ``return_session_id`` is the durable id a surface with no parent Hermes
+    session files its work under, so a later session of the same surface
+    adopts results that landed after the call that asked for them ended.
     """
 
     def refuse(reason: str) -> int:
@@ -2214,6 +2219,7 @@ async def run_talk_session(
         # Snapshot ownership once for this session. Older Hermes builds do not
         # expose the property; None suppresses announcements instead of guessing.
         owner_session_id = _active_parent_session_id()
+        return_session_id = owner_session_id or return_session_id
         talk_lifecycle.attach_session(loop, on_subagent_event, owner_session_id)
         # Progress milestones (hermes-talk#33) share the target and the owner
         # gate: the hook registrations are process-scoped, so attach is what
@@ -2235,7 +2241,7 @@ async def run_talk_session(
         talk_runs.attach_owner(
             talk_session_id=talk_session_id,
             generation_id=generation_id,
-            hermes_session_id=owner_session_id,
+            hermes_session_id=return_session_id,
             operator=auth.source,
             profile=talk_profile,
         )
@@ -2256,7 +2262,7 @@ async def run_talk_session(
         # duplication window is bounded to a crash between the wire hand-off
         # and the flip (see QueuedAnnouncement).
         for orphaned in talk_runs.list_undelivered_for_session(
-            owner_session_id,
+            return_session_id,
             operator=auth.source,
             profile=talk_profile,
             claimant=talk_session_id,
