@@ -19,6 +19,7 @@ import talk_cli
 import talk_host
 import talk_identity
 import talk_operator_auth
+import talk_realtime as rt
 import talk_relay
 
 
@@ -900,6 +901,47 @@ def test_tool_batch_orders_two_outputs_and_continues_once_after_response_done():
     assert [m["item"]["call_id"] for m in sent[:-1]] == ["call_1", "call_2"]
     assert sent[-1] == {"type": "response.create"}
     assert sum(m["type"] == "response.create" for m in sent) == 1
+
+
+@pytest.mark.parametrize(
+    ("calls", "spoken"),
+    [
+        ([("home_control", "done: lights off")], False),
+        ([("home_control", "done: tv volume-up x3"), ("home_control", "done: lights on")], False),
+        ([("home_control", "lights off failed: no route")], True),
+        ([("home_control", "done: lights off"), ("check_work", "run 3 done")], True),
+        ([("check_work", "done: nothing running")], True),
+    ],
+)
+def test_only_a_batch_of_home_commands_that_all_worked_ends_without_a_reply(calls, spoken):
+    async def scenario():
+        sent: list = []
+        outputs = dict((f"call_{i}", out) for i, (_name, out) in enumerate(calls))
+
+        class Relay:
+            async def handle_tool_call_async(self, event):
+                return [rt.SubmitToolResult(event["call_id"], outputs[event["call_id"]])]
+
+        async def send(batch):
+            sent.extend(batch)
+
+        coordinator = talk_cli.ToolResponseCoordinator(
+            Relay(), send, max_pending=4, provider_neutral=True
+        )
+        worker = asyncio.create_task(coordinator.run())
+        for i, (name, _out) in enumerate(calls):
+            coordinator.admit({"call_id": f"call_{i}", "name": name})
+        await coordinator.response_done()
+        await asyncio.wait_for(coordinator.join(), 0.5)
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        return sent
+
+    sent = asyncio.run(scenario())
+    assert [c.call_id for c in sent if isinstance(c, rt.SubmitToolResult)] == [
+        f"call_{i}" for i in range(len(calls))
+    ]
+    assert any(isinstance(c, rt.StartResponse) for c in sent) is spoken
 
 
 def test_tool_continuation_keeps_the_trusted_speaker_binding_metadata():

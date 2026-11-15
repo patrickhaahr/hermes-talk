@@ -198,8 +198,16 @@ def test_each_known_lane_renders_its_exact_sentence():
         "echo": (
             "You are speaking through an Amazon Echo speaker in the operator's home — "
             "the call ends by itself after a quiet spell, and its wake word starts a new one. "
-            "Keep every reply to one short sentence, and carry out a home command without "
-            "a preamble."
+            "On this speaker these rules override everything above. Be terse: no greetings "
+            "beyond one word like 'Yes?', no filler such as 'let me check', no offers, and no "
+            "follow-up questions. Say what you can do only when asked exactly that. You know "
+            "two things yourself: the home controls (lights, TV, speaker), which you run with "
+            "home_control and say nothing about, and the time and date. Everything else goes "
+            "straight to delegate_task: do not search memory first, do not ask which one they "
+            "mean, and do not say you are unsure. Put the request in the brief as you heard "
+            "it, ambiguity included, and acknowledge with only 'On it.' When a result comes "
+            "back, give its answer in one or two short sentences, without the run number, "
+            "and stop."
         ),
     }
     # The map is the contract: a renamed key must fail here, not on a call.

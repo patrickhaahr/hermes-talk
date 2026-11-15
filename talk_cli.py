@@ -53,6 +53,7 @@ try:
         talk_gemini_realtime,
         talk_grok_auth,
         talk_grok_realtime,
+        talk_home,
         talk_host,
         talk_identity,
         talk_lifecycle,
@@ -84,6 +85,7 @@ except ImportError:  # pragma: no cover - flat-module fallback (Hermes file-path
     import talk_gemini_realtime
     import talk_grok_auth
     import talk_grok_realtime
+    import talk_home
     import talk_host
     import talk_identity
     import talk_lifecycle
@@ -364,6 +366,7 @@ class ToolResponseCoordinator:
         self.send_batch = send_batch
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=max_pending)
         self.outputs: list[list | None] = []
+        self._names: list[str] = []
         self.closed = False
         self.failed = False
         self.provider_neutral = provider_neutral
@@ -391,6 +394,21 @@ class ToolResponseCoordinator:
             metadata=metadata if isinstance(metadata, dict) else {}
         )
 
+    def _carried_out_silently(self, batch: list) -> bool:
+        """A response that only ran home commands, all of which worked, needs no reply.
+
+        The operator hears the lights go off; a spoken "Done." after it is
+        noise. A failure still gets its continuation, so it is said out loud.
+        """
+
+        results = [m for m in batch if isinstance(m, talk_realtime.SubmitToolResult)]
+        return (
+            self.provider_neutral
+            and bool(results)
+            and all(name == talk_home.TOOL["name"] for name in self._names)
+            and all(talk_home.worked(result.output) for result in results)
+        )
+
     def admit(self, event: dict) -> bool:
         if self._stop_requested:
             raise RuntimeError("tool call arrived after coordinator stop")
@@ -398,6 +416,7 @@ class ToolResponseCoordinator:
             raise RuntimeError("tool call arrived after response.done")
         position = len(self.outputs)
         self.outputs.append(None)
+        self._names.append(str(event.get("name") or ""))
         candidate = event.get(talk_operator_auth.TRUSTED_CONTINUATION_EVENT_KEY)
         candidate = candidate if isinstance(candidate, dict) else {"type": "response.create"}
         if self.provider_neutral:
@@ -457,13 +476,15 @@ class ToolResponseCoordinator:
             ):
                 return
             batch = [message for result in self.outputs for message in result or []]
-            batch.append(self._continuation)
+            if not self._carried_out_silently(batch):
+                batch.append(self._continuation)
             try:
                 await self.send_batch(batch)
             except Exception:
                 self.failed = True
                 raise
             self.outputs = []
+            self._names = []
             self.closed = False
             self._continuation = self._default_continuation()
             self._host_batch_id = None

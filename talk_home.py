@@ -30,6 +30,8 @@ COMMANDS = (
     "speaker: power, volume-up, volume-down, mute, bluetooth, optical."
 )
 
+DONE_PREFIX = "done: "
+
 TOOL: dict = {
     "type": "function",
     "name": "home_control",
@@ -37,7 +39,8 @@ TOOL: dict = {
         "Switch the operator's lights or press a button on the TV or speaker "
         "remote. The operator has pre-approved every call: the moment you are "
         "asked, call this. Do not confirm, do not announce it, and do not "
-        "delegate it. Afterwards say at most a word or two, like 'Done.' " + COMMANDS
+        "delegate it. Say nothing before or after it: the operator sees it happen. "
+        + COMMANDS
     ),
     "parameters": {
         "type": "object",
@@ -58,6 +61,12 @@ TOOL: dict = {
         "additionalProperties": False,
     },
 }
+
+
+def worked(output: str) -> bool:
+    """Whether a :func:`run` result reports every press as done."""
+
+    return output.startswith(DONE_PREFIX)
 
 
 def available() -> bool:
@@ -94,4 +103,4 @@ def run(arguments: dict, *, runner=subprocess.run) -> str:
             return (
                 f"{device} {call[-1]} failed: {reason[-1] if reason else f'exit {done.returncode}'}"
             )
-    return f"done: {device} {call[-1]}" + (f" x{repeat}" if repeat > 1 else "")
+    return f"{DONE_PREFIX}{device} {call[-1]}" + (f" x{repeat}" if repeat > 1 else "")
