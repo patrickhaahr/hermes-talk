@@ -303,13 +303,16 @@ def start_run(
     session_id: str | None = None,
     session_key: str | None = None,
     instructions: str | None = None,
+    history: list[tuple[str, str]] | None = None,
 ) -> str:
     """POST /v1/runs. Returns the run id; raises on anything else.
 
     ``session_id`` names an EXISTING remote conversation to continue;
     ``session_key`` is the operator's stable scope for the memory a run may
     read and write, and survives the ``/clear`` that ends a session_id.
-    ``instructions`` rides as the run's ephemeral system prompt.
+    ``instructions`` rides as the run's ephemeral system prompt, and
+    ``history`` (request, answer) pairs as the conversation before ``prompt``:
+    the api server keeps no conversation per session id by itself.
     """
 
     body: dict = {"input": prompt}
@@ -317,6 +320,12 @@ def start_run(
         body["session_id"] = session_id
     if instructions:
         body["instructions"] = instructions
+    if history:
+        body["conversation_history"] = [
+            {"role": role, "content": content}
+            for request, answer in history
+            for role, content in (("user", request), ("assistant", answer))
+        ]
     try:
         response = httpx.post(
             talk_config.api_server_url() + RUNS_PATH,
@@ -469,6 +478,7 @@ def run_to_completion(
     on_start=None,
     on_event=None,
     instructions: str | None = None,
+    history: list[tuple[str, str]] | None = None,
 ) -> str:
     """Run one agent turn and return its answer as speakable text.
 
@@ -486,7 +496,11 @@ def run_to_completion(
     """
 
     run_id = start_run(
-        prompt, session_id=session_id, session_key=session_key, instructions=instructions
+        prompt,
+        session_id=session_id,
+        session_key=session_key,
+        instructions=instructions,
+        history=history,
     )
     if on_start is not None:
         with contextlib.suppress(Exception):  # a bookkeeping hook is never fatal

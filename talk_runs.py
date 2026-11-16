@@ -1145,6 +1145,30 @@ def list_undelivered_for_session(
     return out
 
 
+def recent_exchanges(hermes_session_id: str | None, *, limit: int) -> list[tuple[str, str]]:
+    """The last ``limit`` finished tasks of this session and their answers, oldest first.
+
+    Only runs whose worker kept the brief (``meta.task``) count: the label is
+    a 60-character cut of it, too little to stand for the request.
+    """
+
+    if not hermes_session_id:
+        return []
+    with _RUN_LOCK:
+        live = {run_id: {**run, "meta": dict(run["meta"])} for run_id, run in _RUNS.items()}
+    merged: dict[int, dict] = dict(_load_history())
+    merged.update(live)
+    exchanges = [
+        (run["ts"], str(run["meta"]["task"]), str(run.get("output") or ""))
+        for run in merged.values()
+        if run.get("status") in TERMINAL_STATUSES
+        and (run.get("ticket") or {}).get("hermesSessionId") == hermes_session_id
+        and isinstance(run.get("meta"), dict)
+        and run["meta"].get("task")
+    ]
+    return [(task, output) for _ts, task, output in sorted(exchanges)[-limit:]]
+
+
 def owed_since(hermes_session_id: str, since: float) -> bool:
     """Whether a result for this session id landed after ``since``, still unclaimed.
 
@@ -1434,6 +1458,7 @@ __all__ = [
     "mark_delivered",
     "normalize_resource_keys",
     "owed_since",
+    "recent_exchanges",
     "register_process",
     "release_process",
     "reset_for_tests",

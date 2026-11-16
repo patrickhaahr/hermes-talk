@@ -380,7 +380,7 @@ def test_the_api_worker_projects_onto_its_own_run(monkeypatch):
 
     def fake_run_to_completion(
         _task, *, session_id=None, session_key=None, on_start=None, on_event=None,
-        instructions=None,
+        instructions=None, history=None,
     ):
         if on_start is not None:
             on_start("run_remote_1")

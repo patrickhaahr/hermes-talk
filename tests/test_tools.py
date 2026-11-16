@@ -516,6 +516,16 @@ def test_check_work_by_id_speaks_the_output():
     assert "audit" in result
 
 
+def test_check_work_by_id_takes_the_result_so_it_is_not_announced_again():
+    run_id = talk_runs.start_run("agent", "audit", lambda _rid: "the index is rebuilt")
+    _wait_terminal(run_id)
+
+    talk_tools.execute_talk_tool("check_work", {"run_id": run_id})
+
+    assert talk_runs.get_run(run_id)["delivery"] == talk_runs.DELIVERED
+    assert talk_runs.claim_delivery(run_id, claimant="the watcher") is False
+
+
 def test_check_work_by_unknown_id():
     assert "don't have a run number" in talk_tools.execute_talk_tool("check_work", {"run_id": 4242})
 

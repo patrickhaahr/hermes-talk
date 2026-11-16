@@ -205,8 +205,9 @@ def test_each_known_lane_renders_its_exact_sentence():
             "home_control and say nothing about, and the time and date. Everything else goes "
             "straight to delegate_task: do not search memory first, do not ask which one they "
             "mean, and do not say you are unsure. Put the request in the brief as you heard "
-            "it, ambiguity included. Never speak before a tool call, except 'On it.' in the "
-            "same turn as delegate_task; nothing is said after it. When a result comes "
+            "it, ambiguity included. A question about work already handed off, in this call "
+            "or an earlier one, goes to check_work, never to a new delegate_task. Never speak "
+            "before a tool call: the speaker acknowledges a handoff itself. When a result comes "
             "back, give its answer in one or two short sentences, without the run number, "
             "and stop."
         ),

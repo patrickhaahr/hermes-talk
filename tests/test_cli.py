@@ -904,22 +904,33 @@ def test_tool_batch_orders_two_outputs_and_continues_once_after_response_done():
     assert sum(m["type"] == "response.create" for m in sent) == 1
 
 
+FREE = object()
+
+
 @pytest.mark.parametrize(
-    ("calls", "spoken"),
+    ("calls", "reply"),
     [
-        ([("home_control", "done: lights off")], False),
-        ([("home_control", "done: tv volume-up x3"), ("home_control", "done: lights on")], False),
-        ([("home_control", "lights off failed: no route")], True),
-        ([("home_control", "done: lights off"), ("check_work", "run 3 done")], True),
-        ([("check_work", "done: nothing running")], True),
-        ([("end_call", talk_echo.HANGING_UP)], False),
-        ([("delegate_task", "WORK_STARTED #4 kind=agent (check nika) — running")], False),
-        ([("delegate_task", "I can't start that yet — nika is busy.")], True),
-        ([("end_call", "There is no call on the Echo to end.")], True),
+        ([("home_control", "done: lights off")], None),
+        ([("home_control", "done: tv volume-up x3"), ("home_control", "done: lights on")], None),
+        ([("home_control", "lights off failed: no route")], FREE),
+        ([("home_control", "done: lights off"), ("check_work", "run 3 done")], FREE),
+        ([("check_work", "done: nothing running")], FREE),
+        ([("end_call", talk_echo.HANGING_UP)], None),
+        ([("delegate_task", "WORK_STARTED #4 kind=agent (check nika) — running")], "On it."),
+        (
+            [
+                ("delegate_task", "WORK_STARTED #4 kind=agent (check nika) — running"),
+                ("delegate_task", "WORK_STARTED #5 kind=agent (check pi) — running"),
+                ("home_control", "done: lights off"),
+            ],
+            "On it.",
+        ),
+        ([("delegate_task", "I can't start that yet — nika is busy.")], FREE),
+        ([("end_call", "There is no call on the Echo to end.")], FREE),
     ],
 )
-def test_a_batch_that_needs_no_reply_ends_without_one(calls, spoken):
-    """Home commands that all worked, or a hang-up after the goodbye: nothing more to say."""
+def test_a_tool_batch_gets_its_scripted_reply_or_none(calls, reply):
+    """Silence after home commands and a hang-up, 'On it.' after a handoff, else a free reply."""
 
     async def scenario():
         sent: list = []
@@ -948,7 +959,14 @@ def test_a_batch_that_needs_no_reply_ends_without_one(calls, spoken):
     assert [c.call_id for c in sent if isinstance(c, rt.SubmitToolResult)] == [
         f"call_{i}" for i in range(len(calls))
     ]
-    assert any(isinstance(c, rt.StartResponse) for c in sent) is spoken
+    starts = [c for c in sent if isinstance(c, rt.StartResponse)]
+    if reply is None:
+        assert starts == []
+    elif reply is FREE:
+        assert len(starts) == 1 and starts[0].instructions is None
+    else:
+        assert len(starts) == 1 and starts[0].allow_tools is False
+        assert f"'{reply}'" in starts[0].instructions
 
 
 def test_tool_continuation_keeps_the_trusted_speaker_binding_metadata():

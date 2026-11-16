@@ -391,7 +391,7 @@ def test_a_run_started_by_the_host_carries_the_operators_scope(monkeypatch, lane
 
     def fake_run_to_completion(
         _task, *, session_id=None, session_key=None, on_start=None, on_event=None,
-        instructions=None,
+        instructions=None, history=None,
     ):
         seen["session_key"] = session_key
         return "the answer"
@@ -449,6 +449,51 @@ def test_start_run_sends_instructions_only_when_given(monkeypatch):
     assert bodies[1]["instructions"] == "say it short"
 
 
+def test_start_run_sends_earlier_exchanges_as_conversation_history(monkeypatch):
+    bodies = []
+    monkeypatch.setattr(
+        talk_apiserver.httpx,
+        "post",
+        lambda *a, json, **k: bodies.append(json) or FakeResponse(202, {"run_id": "run_abc"}),
+    )
+
+    talk_apiserver.start_run("and the pi?", history=[("check nika", "nika is fine")])
+
+    assert bodies[0]["conversation_history"] == [
+        {"role": "user", "content": "check nika"},
+        {"role": "assistant", "content": "nika is fine"},
+    ]
+
+
+def test_delegated_work_carries_the_earlier_voice_exchanges(monkeypatch):
+    """A follow-up like 'yes, do it' needs the question it answers."""
+
+    talk_runs.reset_for_tests()
+    talk_runs.attach_owner(
+        talk_session_id="ts", generation_id="g", hermes_session_id="talk-echo",
+        operator="op", profile=None,
+    )
+    earlier = talk_runs.start_run("agent", "check nika", lambda _rid: "nika is fine")
+    talk_runs.annotate_run(earlier, task="check nika")
+    _wait_terminal(earlier)
+    monkeypatch.setattr(talk_apiserver, "is_available", lambda: True)
+    seen = {}
+
+    def fake_run_to_completion(task, **kwargs):
+        seen.update(kwargs, task=task)
+        return "ok"
+
+    monkeypatch.setattr(talk_apiserver, "run_to_completion", fake_run_to_completion)
+
+    out = talk_host.host().run_agent("and the pi?")
+    run_id = int(out.split("WORK_STARTED #")[1].split()[0])
+    _wait_terminal(run_id)
+
+    assert seen["history"] == [("check nika", "nika is fine")]
+    assert talk_runs.get_run(run_id)["meta"]["task"] == "and the pi?"
+    talk_runs.reset_for_tests()
+
+
 def test_delegated_work_is_told_its_answer_is_read_aloud(monkeypatch):
     """A run that answers with a file path leaves the voice nothing to say."""
 
@@ -460,7 +505,7 @@ def test_delegated_work_is_told_its_answer_is_read_aloud(monkeypatch):
 
     monkeypatch.setattr(talk_apiserver, "run_to_completion", fake_run_to_completion)
     monkeypatch.setattr(talk_host.talk_runs, "annotate_run", lambda *a, **k: None)
-    talk_host._api_server_worker("check nika", session_id=None)(1)
+    talk_host._api_server_worker("check nika", session_id=None, history=[])(1)
 
     assert seen["instructions"] == talk_host.SPOKEN_ANSWER_INSTRUCTIONS
     assert "read aloud" in seen["instructions"]

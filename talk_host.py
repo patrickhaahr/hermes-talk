@@ -469,14 +469,27 @@ def _detached_agent_worker(task: str, binary: str) -> Any:
 #: so: a run that answered "report saved to /tmp/report.txt" left the operator
 #: with a file path read aloud and no answer.
 SPOKEN_ANSWER_INSTRUCTIONS = (
-    "Your final message will be read aloud to the operator by a voice assistant. "
-    "Put the answer itself in it, in a few plain spoken sentences: no markdown, no "
-    "lists, no file paths, and never point to a saved file or report instead of "
-    "answering. If a next step needs the operator's approval, ask for it in one sentence."
+    "This request comes from the operator talking to Hermes by voice, usually through "
+    "the Echo speaker in their home. Their earlier voice requests and your answers are "
+    "the conversation before it, so a follow-up like 'yes, do it' refers to them. You "
+    "have full control: do what the request needs, changes included, without asking "
+    "first, and pass that authority on to any agent you delegate to. Your final message "
+    "will be read aloud to the operator by a voice assistant. Put the answer itself in "
+    "it, in a few plain spoken sentences: no markdown, no lists, no file paths, and "
+    "never point to a saved file or report instead of answering. Ask something back "
+    "only when you cannot go on without it."
 )
 
+#: Earlier voice exchanges a delegated run gets as its conversation: enough for
+#: a follow-up to find what it refers to, few enough to stay cheap per run.
+VOICE_HISTORY_EXCHANGES = 10
+#: The brief kept per run for that history; the answer is already capped.
+TASK_KEEP_CHARS = 1_000
 
-def _api_server_worker(task: str, *, session_id: str | None) -> Any:
+
+def _api_server_worker(
+    task: str, *, session_id: str | None, history: list[tuple[str, str]] | None = None
+) -> Any:
     """Build the worker that runs one api_server agent run to completion.
 
     Runs on a :mod:`talk_runs` thread, which is the only place blocking is
@@ -490,12 +503,18 @@ def _api_server_worker(task: str, *, session_id: str | None) -> Any:
     — and a run that silently lost its scope reads as working, right up until
     the operator notices the host remembers nothing across a ``/clear``. Read
     at dispatch time, so a knob set after import is honoured by the next run.
+
+    ``history`` is the voice conversation this task continues; ``None`` marks
+    a lookup that is not part of it, so its brief is not kept for later ones.
     """
 
     session_key = talk_config.session_key()
 
     def worker(run_id: int) -> str:
-        talk_runs.annotate_run(run_id, lane=LANE_API_SERVER)
+        if history is None:
+            talk_runs.annotate_run(run_id, lane=LANE_API_SERVER)
+        else:
+            talk_runs.annotate_run(run_id, lane=LANE_API_SERVER, task=task[:TASK_KEEP_CHARS])
         # The same spawn stamp the SSE sidecar carries: a poll tap that
         # outlives its session must not reconcile prompts into the next one.
         approval_generation = talk_approvals.current_generation()
@@ -540,6 +559,7 @@ def _api_server_worker(task: str, *, session_id: str | None) -> Any:
                 on_start=_on_start,
                 on_event=_on_poll,
                 instructions=SPOKEN_ANSWER_INSTRUCTIONS,
+                history=history,
             )[: talk_runs.HISTORY_OUTPUT_CAP]
         except talk_apiserver.TalkApiServerError as exc:
             message = str(exc)[-talk_runs.HISTORY_OUTPUT_CAP :]
@@ -547,6 +567,15 @@ def _api_server_worker(task: str, *, session_id: str | None) -> Any:
             return message
 
     return worker
+
+
+def _voice_history() -> list[tuple[str, str]]:
+    """Earlier exchanges of the bound session; read on the dispatching thread."""
+
+    owner = talk_runs.current_owner() or {}
+    return talk_runs.recent_exchanges(
+        owner.get("hermesSessionId"), limit=VOICE_HISTORY_EXCHANGES
+    )
 
 
 def _resolve_persona() -> str:
@@ -1143,7 +1172,7 @@ class HostAdapter:
             run_id = talk_runs.start_run(
                 "agent",
                 label,
-                _api_server_worker(prompt, session_id=None),
+                _api_server_worker(prompt, session_id=None, history=_voice_history()),
                 execution_mode=execution_mode,
                 resource_keys=resource_keys,
             )

@@ -744,6 +744,29 @@ def test_owed_since_sees_only_results_that_landed_after_the_mark():
     assert not talk_runs.owed_since("talk-echo", mark)
 
 
+def test_recent_exchanges_are_this_sessions_tasks_and_answers_oldest_first():
+    _attach_test_owner(hermes_session_id="talk-echo")
+    for task, answer in [("check nika", "nika is fine"), ("check the pi", "the pi is 82% full")]:
+        run_id = talk_runs.start_run("agent", task, lambda _rid, a=answer: a)
+        talk_runs.annotate_run(run_id, task=task)
+        _wait_terminal(run_id)
+    untold = talk_runs.start_run("agent", "no brief kept", lambda _rid: "x")
+    _wait_terminal(untold)
+    _attach_test_owner(hermes_session_id="sess-other")
+    other = talk_runs.start_run("agent", "theirs", lambda _rid: "not ours")
+    talk_runs.annotate_run(other, task="theirs")
+    _wait_terminal(other)
+
+    assert talk_runs.recent_exchanges("talk-echo", limit=5) == [
+        ("check nika", "nika is fine"),
+        ("check the pi", "the pi is 82% full"),
+    ]
+    assert talk_runs.recent_exchanges("talk-echo", limit=1) == [
+        ("check the pi", "the pi is 82% full")
+    ]
+    assert talk_runs.recent_exchanges(None, limit=5) == []
+
+
 def test_pre_fix_history_is_never_adopted(history_env: Path):
     """Records written before the ticket existed belong to nobody."""
 

@@ -587,6 +587,9 @@ def _describe_run(run: dict) -> str:
     return line
 
 
+CHECK_WORK_CLAIMANT = "check_work"
+
+
 def _handle_check_work(arguments: dict) -> str:
     run_id = arguments.get("run_id")
     if run_id is not None:
@@ -597,6 +600,11 @@ def _handle_check_work(arguments: dict) -> str:
         run = talk_runs.get_run(wanted)
         if run is None:
             return f"I don't have a run number {wanted} in this session."
+        if run.get("status") in talk_runs.TERMINAL_STATUSES and talk_runs.claim_delivery(
+            wanted, claimant=CHECK_WORK_CLAIMANT
+        ):
+            # Read out here, so its own announcement must not say it again.
+            talk_runs.mark_delivered(wanted, claimant=CHECK_WORK_CLAIMANT)
         body = run.get("output") or "still working"
         return f"{_describe_run(run)}, {run.get('label')}: {body}"
 
@@ -877,21 +885,25 @@ def _handle_talk_capabilities(arguments: dict) -> str:
     return rendered
 
 
-#: Results that need no spoken reply: the operator sees the lights switch, the
-#: goodbye was already said before the hang-up, and 'On it.' before a handoff
-#: (its result is spoken when it lands).
-_QUIET_RESULTS = {
-    "home_control": talk_home.worked,
-    "delegate_task": lambda output: output.startswith("WORK_STARTED"),
-    "end_call": lambda output: output == talk_echo.HANGING_UP,
+HANDOFF_REPLY = "On it."
+
+#: What the speaker says after a tool result instead of a free reply, "" for
+#: nothing: the operator sees the lights switch, the goodbye was said before
+#: the hang-up, and a handoff gets the same two words every time (its result
+#: is spoken when it lands). Left to the model, a handoff became "It's running
+#: and I'll summarize what it finds", or nothing at all.
+_SCRIPTED_REPLIES = {
+    "home_control": lambda output: "" if talk_home.worked(output) else None,
+    "delegate_task": lambda output: HANDOFF_REPLY if output.startswith("WORK_STARTED") else None,
+    "end_call": lambda output: "" if output == talk_echo.HANGING_UP else None,
 }
 
 
-def ends_quietly(name: str, output: str) -> bool:
-    """Whether this tool result leaves the model nothing to say."""
+def scripted_reply(name: str, output: str) -> str | None:
+    """The fixed reply to this tool result, "" for none, or None for the model's own."""
 
-    quiet = _QUIET_RESULTS.get(name)
-    return quiet is not None and quiet(output)
+    script = _SCRIPTED_REPLIES.get(name)
+    return script(output) if script is not None else None
 
 
 _HANDLERS = {

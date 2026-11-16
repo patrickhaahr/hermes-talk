@@ -36,7 +36,7 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 try:
     from . import (
@@ -392,11 +392,13 @@ class ToolResponseCoordinator:
             metadata=metadata if isinstance(metadata, dict) else {}
         )
 
-    def _carried_out_silently(self) -> bool:
-        """Whether every result in this response leaves nothing to say.
+    def _scripted_continuation(self):
+        """The continuation when every result in this response has a fixed reply.
 
-        A spoken "Done." after the lights visibly go off, or a second goodbye
-        after the hang-up, is noise. A failure still gets its continuation.
+        ``None`` leaves the default continuation (the model replies freely);
+        ``False`` means nothing is said; otherwise a tools-off response told to
+        say exactly the joined fixed lines. One result without a fixed reply
+        (a failure, a lookup) and the model replies freely to all of them.
         """
 
         results = [
@@ -405,11 +407,18 @@ class ToolResponseCoordinator:
             for message in result or []
             if isinstance(message, talk_realtime.SubmitToolResult)
         ]
-        return (
-            self.provider_neutral
-            and len(results) == len(self._names)
-            and bool(results)
-            and all(talk_tools.ends_quietly(name, output) for name, output in results)
+        if not self.provider_neutral or not results or len(results) != len(self._names):
+            return None
+        lines = [talk_tools.scripted_reply(name, output) for name, output in results]
+        if any(line is None for line in lines):
+            return None
+        said = " ".join(dict.fromkeys(line for line in lines if line))
+        if not said:
+            return False
+        return replace(
+            self._continuation,
+            allow_tools=False,
+            instructions=f"Say exactly '{said}' and nothing else.",
         )
 
     def admit(self, event: dict) -> bool:
@@ -479,8 +488,11 @@ class ToolResponseCoordinator:
             ):
                 return
             batch = [message for result in self.outputs for message in result or []]
-            if not self._carried_out_silently():
+            scripted = self._scripted_continuation()
+            if scripted is None:
                 batch.append(self._continuation)
+            elif scripted is not False:
+                batch.append(scripted)
             try:
                 await self.send_batch(batch)
             except Exception:
@@ -1790,6 +1802,7 @@ async def run_talk_session(
     keyboard_stop: Callable[[], None] | None = None
 
     def on_barge_in() -> None:
+        print(" [interrupted]", flush=True)
         played = audio.played_ms
         boundary = audio.drain_playback()
         played_item = None
@@ -1831,6 +1844,13 @@ async def run_talk_session(
     def on_caption(text: str) -> None:
         print(text, end="", flush=True)
 
+    def on_transcript_turn(role: str, text: str) -> None:
+        # The operator's words beside the model's: a log of replies alone
+        # cannot tell a misheard request from a misbehaving model.
+        if role == talk_realtime.TranscriptRole.USER.value:
+            print(f"\n> {text}", flush=True)
+        capture.append_turn(role, text)
+
     def on_error(text: str) -> None:
         print(f"\n[talk] {text}", file=sys.stderr, flush=True)
 
@@ -1838,7 +1858,7 @@ async def run_talk_session(
     relay = RealtimeRelay(
         on_audio=audio.queue_playback,
         on_caption=on_caption,
-        on_transcript_turn=capture.append_turn,
+        on_transcript_turn=on_transcript_turn,
         on_barge_in=on_barge_in,
         on_error=on_error,
         tool_authorizer=(

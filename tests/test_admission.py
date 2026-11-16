@@ -459,7 +459,9 @@ def test_the_registry_lanes_speak_the_refusal(monkeypatch):
 
     monkeypatch.setattr(talk_host.talk_apiserver, "is_available", lambda: True)
     monkeypatch.setattr(
-        talk_host, "_api_server_worker", lambda prompt, session_id=None: _Gate().worker
+        talk_host,
+        "_api_server_worker",
+        lambda prompt, session_id=None, history=None: _Gate().worker,
     )
     gate = _Gate()
     first = talk_runs.start_run("agent", "audit the repo", gate.worker, resource_keys=["/repo"])
@@ -476,7 +478,9 @@ def test_the_registry_lanes_speak_the_refusal(monkeypatch):
 def test_the_registry_lanes_admit_and_record_the_declaration(monkeypatch):
     monkeypatch.setattr(talk_host.talk_apiserver, "is_available", lambda: True)
     monkeypatch.setattr(
-        talk_host, "_api_server_worker", lambda prompt, session_id=None: (lambda _r: "ok")
+        talk_host,
+        "_api_server_worker",
+        lambda prompt, session_id=None, history=None: (lambda _r: "ok"),
     )
 
     spoken = talk_host.host().run_agent(

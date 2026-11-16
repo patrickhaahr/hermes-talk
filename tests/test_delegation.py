@@ -267,7 +267,11 @@ def test_no_ctx_at_all_goes_straight_to_the_detached_backend(monkeypatch):
         talk_host.subprocess, "Popen", lambda *a, **k: _fake_completed(stdout="done")
     )
 
-    assert "WORK_STARTED #" in talk_host.host().run_agent("go")
+    receipt = talk_host.host().run_agent("go")
+    assert "WORK_STARTED #" in receipt
+    # Let the run end while Popen is still patched: a worker outliving this
+    # test would finish the next test's run, which reuses the same number.
+    _wait_terminal(int(receipt.split("#", 1)[1].split(" ", 1)[0]))
 
 
 def test_a_nonzero_exit_lands_as_a_failed_run_with_the_reason(monkeypatch):
@@ -602,7 +606,7 @@ def test_the_api_run_id_is_durable_while_the_run_is_still_going(monkeypatch, tmp
 
     def fake_run_to_completion(
         _task, *, session_id=None, session_key=None, on_start=None, on_event=None,
-        instructions=None,
+        instructions=None, history=None,
     ):
         if on_start is not None:
             on_start("run_remote_42")
