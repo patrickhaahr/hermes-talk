@@ -465,6 +465,17 @@ def _detached_agent_worker(task: str, binary: str) -> Any:
     return worker
 
 
+#: Every delegated answer is spoken by the voice session, so the agent is told
+#: so: a run that answered "report saved to /tmp/report.txt" left the operator
+#: with a file path read aloud and no answer.
+SPOKEN_ANSWER_INSTRUCTIONS = (
+    "Your final message will be read aloud to the operator by a voice assistant. "
+    "Put the answer itself in it, in a few plain spoken sentences: no markdown, no "
+    "lists, no file paths, and never point to a saved file or report instead of "
+    "answering. If a next step needs the operator's approval, ask for it in one sentence."
+)
+
+
 def _api_server_worker(task: str, *, session_id: str | None) -> Any:
     """Build the worker that runs one api_server agent run to completion.
 
@@ -528,6 +539,7 @@ def _api_server_worker(task: str, *, session_id: str | None) -> Any:
                 session_key=session_key,
                 on_start=_on_start,
                 on_event=_on_poll,
+                instructions=SPOKEN_ANSWER_INSTRUCTIONS,
             )[: talk_runs.HISTORY_OUTPUT_CAP]
         except talk_apiserver.TalkApiServerError as exc:
             message = str(exc)[-talk_runs.HISTORY_OUTPUT_CAP :]

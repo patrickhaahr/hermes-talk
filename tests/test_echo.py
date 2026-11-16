@@ -499,6 +499,55 @@ def test_end_call_waits_for_the_goodbye_then_hangs_up():
     assert audio.hung_up()
 
 
+def test_end_call_plays_the_goodbye_then_the_bye_tone_then_hands_back(monkeypatch):
+    monkeypatch.setattr(talk_echo, "PACE_TICK_S", 0.005)
+
+    async def session(*, audio, lane, announce_queue=None):
+        audio.start()
+        try:
+            while audio.read_input_chunk() is None:
+                await asyncio.sleep(0.005)
+            audio.queue_playback(_ms(50), "bye")
+            talk_echo.run_end_call({})
+            await asyncio.Event().wait()
+        finally:
+            audio.stop()
+
+    async def go():
+        stopped = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        times = {}
+
+        async def on_event(event, writer):
+            if event.type == "run-satellite":
+                await asyncio.sleep(0.1)
+                _wake(writer)
+                await writer.drain()
+                times["woke"] = loop.time()
+            if event.type == "audio-stop":
+                times["stopped"] = loop.time()
+                stopped.set()
+
+        echo, received = _fake_echo(on_event)
+        server = await asyncio.start_server(echo, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        surface = asyncio.create_task(
+            talk_echo.serve("127.0.0.1", port, idle_s=30, runner=session)
+        )
+        try:
+            await asyncio.wait_for(stopped.wait(), 5)
+        finally:
+            surface.cancel()
+            await asyncio.gather(surface, return_exceptions=True)
+            server.close()
+        return received, times
+
+    received, times = asyncio.run(go())
+    played = b"".join(e.payload for e in received if e.type == "audio-chunk")
+    assert played == _ms(50) + talk_echo.BYE_TONE
+    assert times["stopped"] - times["woke"] < 1.5, "hung up soon after the goodbye"
+
+
 def test_end_call_never_waits_past_its_bound_even_if_the_model_keeps_talking():
     clock = Clock()
     audio = EchoAudio(lambda _: None, clock=clock)

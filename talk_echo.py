@@ -25,6 +25,7 @@ import contextlib
 import functools
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -92,9 +93,9 @@ QUIET_END_CODE = "stt-no-text-recognized"
 STANDBY_REFRESH_S = 15 * 60
 STANDBY_RETRY_MIN_S = 2.0
 STANDBY_RETRY_MAX_S = 60.0
-#: After end_call, the goodbye still has to be generated and played: the call
-#: closes once the Echo has been silent for a moment, never sooner than this.
-HANG_UP_MIN_S = 2.5
+#: The goodbye is said in the same turn as end_call, so the call closes once
+#: the Echo is silent, never sooner than this: a goodbye a moment late still plays.
+HANG_UP_MIN_S = 0.5
 HANG_UP_MAX_S = 10.0
 #: ``hermes talk echo-say`` reaches the running surface through this socket,
 #: under the Hermes home (only its owner may connect).
@@ -203,6 +204,21 @@ class Upsampler:
 
 
 # -- the audio device -------------------------------------------------------------
+
+
+def _bye_tone() -> bytes:
+    """A 120 ms falling two-tone: hassmic's rising wake blip, mirrored, for the hang-up."""
+
+    n = RATE * 120 // 1000
+    fade = RATE * 0.01
+    return array.array("h", (
+        round(6000 * min(1.0, i / fade, (n - i) / fade)
+              * math.sin(2 * math.pi * (1320.0 if i < n // 2 else 880.0) * i / RATE))
+        for i in range(n)
+    )).tobytes()
+
+
+BYE_TONE = _bye_tone()
 
 
 class EchoAudio:
@@ -430,6 +446,17 @@ class EchoAudio:
             self._playback.append((item_id, pcm))
             self._queued_playback_bytes += len(pcm)
 
+    async def play_out(self, pcm: bytes) -> None:
+        """Queue ``pcm`` and return once the Echo has played it."""
+
+        self.queue_playback(pcm, "bye-tone")
+        deadline = self._clock() + HANG_UP_MAX_S
+        while self._clock() < deadline:
+            with self._lock:
+                if self._queued_playback_bytes == 0 and self._sent_until <= self._clock():
+                    return
+            await asyncio.sleep(PACE_TICK_S)
+
     def drain_playback(self) -> tuple[str | None, int]:
         """Discard unsent audio and return the heard boundary.
 
@@ -540,6 +567,7 @@ class _Conversation:
             if self.active:
                 if self.audio.hung_up():
                     _log.info("echo: end_call, ending the session")
+                    await self.audio.play_out(BYE_TONE)
                     break
                 if self.audio.quiet_s() >= self._idle_s:
                     _log.info("echo: quiet for %.0f s, ending the session", self._idle_s)

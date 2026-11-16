@@ -390,7 +390,8 @@ def test_a_run_started_by_the_host_carries_the_operators_scope(monkeypatch, lane
     seen: dict = {}
 
     def fake_run_to_completion(
-        _task, *, session_id=None, session_key=None, on_start=None, on_event=None
+        _task, *, session_id=None, session_key=None, on_start=None, on_event=None,
+        instructions=None,
     ):
         seen["session_key"] = session_key
         return "the answer"
@@ -431,6 +432,38 @@ def test_start_run_returns_the_run_id(monkeypatch):
     )
 
     assert talk_apiserver.start_run("do the thing") == "run_abc"
+
+
+def test_start_run_sends_instructions_only_when_given(monkeypatch):
+    bodies = []
+    monkeypatch.setattr(
+        talk_apiserver.httpx,
+        "post",
+        lambda *a, json, **k: bodies.append(json) or FakeResponse(202, {"run_id": "run_abc"}),
+    )
+
+    talk_apiserver.start_run("do the thing")
+    talk_apiserver.start_run("do the thing", instructions="say it short")
+
+    assert "instructions" not in bodies[0]
+    assert bodies[1]["instructions"] == "say it short"
+
+
+def test_delegated_work_is_told_its_answer_is_read_aloud(monkeypatch):
+    """A run that answers with a file path leaves the voice nothing to say."""
+
+    seen = {}
+
+    def fake_run_to_completion(task, **kwargs):
+        seen.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr(talk_apiserver, "run_to_completion", fake_run_to_completion)
+    monkeypatch.setattr(talk_host.talk_runs, "annotate_run", lambda *a, **k: None)
+    talk_host._api_server_worker("check nika", session_id=None)(1)
+
+    assert seen["instructions"] == talk_host.SPOKEN_ANSWER_INSTRUCTIONS
+    assert "read aloud" in seen["instructions"]
 
 
 def test_start_run_raises_a_speakable_error_on_5xx(monkeypatch):

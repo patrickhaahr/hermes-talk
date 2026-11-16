@@ -877,10 +877,12 @@ def _handle_talk_capabilities(arguments: dict) -> str:
     return rendered
 
 
-#: Results that need no spoken reply: the operator sees the lights switch, and
-#: the goodbye was already said before the hang-up.
+#: Results that need no spoken reply: the operator sees the lights switch, the
+#: goodbye was already said before the hang-up, and 'On it.' before a handoff
+#: (its result is spoken when it lands).
 _QUIET_RESULTS = {
     "home_control": talk_home.worked,
+    "delegate_task": lambda output: output.startswith("WORK_STARTED"),
     "end_call": lambda output: output == talk_echo.HANGING_UP,
 }
 

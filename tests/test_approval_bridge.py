@@ -715,7 +715,9 @@ def test_the_api_server_worker_starts_the_approval_sidecar(monkeypatch):
     )
     watched = []
 
-    def fake_run_to_completion(task, *, session_id, session_key, on_start, on_event):
+    def fake_run_to_completion(
+        task, *, session_id, session_key, on_start, on_event, instructions=None
+    ):
         on_start("run_remote_9")
         return "the agent finished"
 

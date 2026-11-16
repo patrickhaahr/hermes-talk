@@ -913,6 +913,8 @@ def test_tool_batch_orders_two_outputs_and_continues_once_after_response_done():
         ([("home_control", "done: lights off"), ("check_work", "run 3 done")], True),
         ([("check_work", "done: nothing running")], True),
         ([("end_call", talk_echo.HANGING_UP)], False),
+        ([("delegate_task", "WORK_STARTED #4 kind=agent (check nika) — running")], False),
+        ([("delegate_task", "I can't start that yet — nika is busy.")], True),
         ([("end_call", "There is no call on the Echo to end.")], True),
     ],
 )

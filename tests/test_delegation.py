@@ -601,7 +601,8 @@ def test_the_api_run_id_is_durable_while_the_run_is_still_going(monkeypatch, tmp
     release = _threading.Event()
 
     def fake_run_to_completion(
-        _task, *, session_id=None, session_key=None, on_start=None, on_event=None
+        _task, *, session_id=None, session_key=None, on_start=None, on_event=None,
+        instructions=None,
     ):
         if on_start is not None:
             on_start("run_remote_42")
