@@ -916,6 +916,7 @@ FREE = object()
         ([("home_control", "done: lights off"), ("check_work", "run 3 done")], FREE),
         ([("check_work", "done: nothing running")], FREE),
         ([("end_call", talk_echo.HANGING_UP)], None),
+        ([("not_for_me", talk_echo.NOT_FOR_ME)], None),
         ([("delegate_task", "WORK_STARTED #4 kind=agent (check nika) — running")], "On it."),
         (
             [

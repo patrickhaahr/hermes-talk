@@ -662,6 +662,26 @@ END_CALL_TOOL: dict = {
 }
 
 
+#: A room speaker hears the tail of its own wake word, noise, the TV, and words
+#: meant for someone else; any reply to those talks over the operator's real
+#: request. Calling this is how the model stays silent: the call goes on.
+NOT_FOR_ME_TOOL: dict = {
+    "type": "function",
+    "name": "not_for_me",
+    "description": (
+        "Stay silent: what you just heard was not a request to you. Use it for noise, "
+        "a cut-off fragment, a lone word, the tail of the wake word, or speech in a "
+        "language other than English or Danish. Say nothing before or after it."
+    ),
+    "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+}
+NOT_FOR_ME = "Ignored; still listening."
+
+
+def run_not_for_me(arguments: dict) -> str:
+    return NOT_FOR_ME
+
+
 def note_action(what: str) -> None:
     """Log a tool call or delegation with its latency, for comparing voice models."""
 
@@ -949,6 +969,8 @@ __all__ = [
     "DEFAULT_PORT",
     "END_CALL_TOOL",
     "LANE",
+    "NOT_FOR_ME",
+    "NOT_FOR_ME_TOOL",
     "EchoAudio",
     "Upsampler",
     "WyomingError",
@@ -957,6 +979,7 @@ __all__ = [
     "encode_event",
     "read_event",
     "run_end_call",
+    "run_not_for_me",
     "send_say",
     "serve",
 ]

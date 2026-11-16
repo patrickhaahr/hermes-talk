@@ -610,10 +610,10 @@ def test_end_call_is_offered_only_to_a_surface_that_can_hang_up():
     def names(**kw):
         return [t["name"] for t in talk_tools.default_talk_tools(**kw)]
 
-    assert "end_call" in names(hangable=True)
-    assert "end_call" not in names()
+    assert {"end_call", "not_for_me"} <= set(names(hangable=True))
+    assert not {"end_call", "not_for_me"} & set(names())
     assert talk_tools._HANDLERS["end_call"] is talk_echo.run_end_call
-    assert "end_call" in talk_operator_auth.READ_ONLY_TALK_TOOLS
+    assert {"end_call", "not_for_me"} <= talk_operator_auth.READ_ONLY_TALK_TOOLS
 
 
 def test_a_standby_taking_the_call_learns_the_time_it_started():
