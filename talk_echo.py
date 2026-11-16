@@ -75,8 +75,17 @@ SPEECH_LEVEL = 0.02
 #: be heard as the operator, and answered. Someone talking over the reply is
 #: louder and still cuts it. Normalized RMS; 0.02 is -34 dBFS.
 DEFAULT_BARGE_IN_LEVEL = 0.02
-#: How long the room still rings with the reply after the last audio played.
-ECHO_TAIL_S = 0.3
+#: The canceller's leftover is not always quiet: after the operator talks over
+#: a reply it re-adapts for seconds, and meanwhile hands back the reply at up to
+#: its own level (measured 1.2x, 2026-11-16). So the floor above also scales
+#: with the reply: the operator counts only above this multiple of the loudest
+#: reply audio sent within ECHO_SPAN_S, which covers its trip back to the mic.
+ECHO_RATIO = 2.0
+ECHO_SPAN_S = 0.8
+#: How long the reply still comes back after its last audio was sent: the trip
+#: to the mic takes 0.3-0.45 s, and the room rings on. A leftover let through
+#: here is answered as the operator, often as their goodbye.
+ECHO_TAIL_S = 0.6
 
 CONNECT_TIMEOUT_S = 10.0
 RECONNECT_MIN_S = 1.0
@@ -245,6 +254,9 @@ class EchoAudio:
         self._barge_in_level = barge_in_level
         self._levels: dict[bool, list[float]] = {True: [], False: []}
         self._gated = 0
+        self._echo: deque[tuple[float, float]] = deque()  # (sent until, level) per playback chunk
+        self._cut_item: str | None = None
+        self._open_until = 0.0
         self._lock = threading.Lock()
         self._upsampler = Upsampler()
         self._input: deque[bytes] = deque()
@@ -294,11 +306,12 @@ class EchoAudio:
             return
         level = talk_audio._pcm16_rms(pcm)
         with self._lock:
-            echo_playing = self._sent_until + ECHO_TAIL_S > self._clock()
+            now = self._clock()
+            echo_playing = self._sent_until + ECHO_TAIL_S > now and now >= self._open_until
             levels = self._levels[echo_playing]
             if len(levels) < 20_000:
                 levels.append(level)
-            if echo_playing and level < self._barge_in_level:
+            if echo_playing and level < self._echo_floor(now):
                 pcm = bytes(len(pcm))
                 self._gated += 1
             elif level >= SPEECH_LEVEL:
@@ -311,6 +324,28 @@ class EchoAudio:
             while self._input_bytes > MAX_INPUT_BYTES:
                 self._input_bytes -= len(self._input.popleft())
                 self._dropped_input_blocks += 1
+
+    def _echo_floor(self, now: float) -> float:
+        while self._echo and self._echo[0][0] < now - ECHO_SPAN_S:
+            self._echo.popleft()
+        reply = max((level for _, level in self._echo), default=0.0)
+        return max(self._barge_in_level, ECHO_RATIO * reply)
+
+    def cut_reply(self) -> None:
+        """The wake word was said over the reply: stop it and hear what follows.
+
+        The rest of the reply still streaming in is dropped, and the microphone
+        is open even over what the Echo has already been sent. What was heard is
+        kept for the session's own barge-in, which follows the operator's words.
+        """
+
+        with self._lock:
+            self._cut_item = self._played_item_id
+            self._echo.clear()
+            self._open_until = self._clock() + ECHO_SPAN_S
+            self._playback.clear()
+            self._discarded_playback_bytes += self._queued_playback_bytes
+            self._queued_playback_bytes = 0
 
     def level_report(self) -> str:
         """Microphone levels with and without the Echo speaking, to tune the barge-in level."""
@@ -325,7 +360,7 @@ class EchoAudio:
         with self._lock:
             return (
                 f"microphone while the Echo spoke: {summary(self._levels[True])}, "
-                f"{self._gated} gated under {self._barge_in_level}; "
+                f"{self._gated} gated under {self._barge_in_level} or {ECHO_RATIO}x the reply; "
                 f"otherwise: {summary(self._levels[False])}"
             )
 
@@ -384,6 +419,7 @@ class EchoAudio:
                 return
             chunk = self._take_playback(due)
             self._sent_until += len(chunk) / (RATE * FRAME_BYTES)
+            self._echo.append((self._sent_until, talk_audio._pcm16_rms(chunk)))
             begin = not self._started_reply
             self._started_reply = True
         if fresh:
@@ -440,6 +476,8 @@ class EchoAudio:
         if not pcm:
             return
         with self._lock:
+            if item_id is not None and item_id == self._cut_item:
+                return
             if self._queued_playback_bytes + len(pcm) > MAX_PLAYBACK_BYTES:
                 self._dropped_playback_bytes += len(pcm)
                 return
@@ -765,6 +803,10 @@ async def _linked(
                 elif not current.active:
                     _log.info("echo: wake word, the standby session takes the call")
                     current.activate()
+            elif event.type == "detection":
+                if current is not None and current.active:
+                    _log.info("echo: wake word during the call, the reply stops")
+                    current.audio.cut_reply()
             elif event.type == "ping":
                 writer.write(encode_event("pong"))
             elif event.type == "info":

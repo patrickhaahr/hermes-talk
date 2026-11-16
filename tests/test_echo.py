@@ -290,7 +290,47 @@ def test_while_the_echo_speaks_only_a_voice_louder_than_its_echo_gets_through():
     audio.drain_playback()
     audio.feed_microphone(leftover)
     assert set(audio.read_input_chunk()) != {0}
-    assert "1 gated under 0.02" in audio.level_report()
+    assert "1 gated under 0.02 or" in audio.level_report()
+
+
+def test_echo_as_loud_as_the_operator_is_held_back_by_the_reply_level():
+    """After the operator talks over it, the canceller can leak the reply at its own level."""
+
+    clock = Clock()
+    audio = EchoAudio(lambda _: None, clock=clock, barge_in_level=0.02)
+    reply = _pcm([3300, -3300] * 2400)  # about -20 dBFS, a normal reply
+    leak = _pcm([4000, -4000] * 501)  # the reply coming back, a little louder
+    shout = _pcm([12000, -12000] * 501)
+    audio.queue_playback(reply, "reply")
+    audio.pace_once()
+
+    audio.feed_microphone(leak)
+    assert set(audio.read_input_chunk()) == {0}
+    audio.feed_microphone(shout)
+    assert set(audio.read_input_chunk()) != {0}
+
+    audio.drain_playback()
+    clock.now += talk_echo.PLAYBACK_LEAD_S + 0.45  # the room still carries the reply back
+    audio.feed_microphone(leak)
+    assert set(audio.read_input_chunk()) == {0}
+
+
+def test_wake_word_during_the_reply_stops_it_and_opens_the_microphone():
+    clock, wire = Clock(), []
+    audio = EchoAudio(wire.append, clock=clock, barge_in_level=0.02)
+    audio.queue_playback(_pcm([3300, -3300] * 24000), "reply")
+    audio.pace_once()
+
+    audio.cut_reply()
+    assert not audio.playback_pending
+    audio.queue_playback(_ms(500), "reply")  # the rest of it, still streaming in
+    assert not audio.playback_pending
+    audio.feed_microphone(_pcm([4000, -4000] * 501))  # "stop", over what the Echo still plays
+    assert set(audio.read_input_chunk()) != {0}
+
+    assert audio.drain_playback()[0] == "reply", "the session still learns what was heard"
+    audio.queue_playback(_ms(500), "next")
+    assert audio.playback_pending
 
 
 # -- standby, end_call, echo-say ---------------------------------------------------------
