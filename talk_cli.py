@@ -210,7 +210,8 @@ def _announcement_commands(
     return [
         talk_realtime.AddContext(
             item_id=item_id,
-            text=f"{headline} Tell the operator briefly.{framing}",
+            text=f"{headline} Tell the operator what came of it in a sentence or two of plain "
+            f"speech, numbers rounded to everyday units, without the run number.{framing}",
         ),
         talk_realtime.StartResponse(allow_tools=False),
         talk_realtime.RemoveContext(item_id=item_id),
@@ -929,7 +930,7 @@ def run_finished_messages(run: dict) -> list[dict]:
 def run_finished_commands(run: dict) -> list[talk_realtime.RealtimeCommand]:
     """Provider-neutral commands that make the model speak a finished run."""
 
-    tail = str(run.get("output") or "").strip()[-WATCH_OUTPUT_TAIL_CHARS:]
+    tail = talk_runs.spoken_output(run)[-WATCH_OUTPUT_TAIL_CHARS:]
     verb = "finished" if run.get("status") == "done" else "failed"
     headline = f"Background run #{run.get('runId')} {verb}" + (
         "." if tail else " with no output."
@@ -1802,7 +1803,8 @@ async def run_talk_session(
     keyboard_stop: Callable[[], None] | None = None
 
     def on_barge_in() -> None:
-        print(" [interrupted]", flush=True)
+        if relay.response_active or speaker_busy():
+            print(" [interrupted]", flush=True)
         played = audio.played_ms
         boundary = audio.drain_playback()
         played_item = None

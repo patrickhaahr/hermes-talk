@@ -1145,6 +1145,18 @@ def list_undelivered_for_session(
     return out
 
 
+#: Hermes appends this footer when a file write failed during the turn
+#: (``display.file_mutation_verifier``). It tells a chat reader to run
+#: ``git status``; read aloud it is noise about the agent's own scratch files.
+MUTATION_VERIFIER_FOOTER = "\u26a0\ufe0f File-mutation verifier:"
+
+
+def spoken_output(run: dict) -> str:
+    """A run's output as it should be read aloud: without Hermes's verifier footer."""
+
+    return str(run.get("output") or "").split(MUTATION_VERIFIER_FOOTER, 1)[0].strip()
+
+
 def recent_exchanges(hermes_session_id: str | None, *, limit: int) -> list[tuple[str, str]]:
     """The last ``limit`` finished tasks of this session and their answers, oldest first.
 
@@ -1440,6 +1452,7 @@ __all__ = [
     "HISTORY_OUTPUT_CAP",
     "MAX_RESOURCE_KEYS",
     "MAX_RESOURCE_KEY_CHARS",
+    "MUTATION_VERIFIER_FOOTER",
     "RUN_KINDS",
     "TERMINAL_STATUSES",
     "AdmissionRefused",
@@ -1464,6 +1477,7 @@ __all__ = [
     "reset_for_tests",
     "resolve_execution_mode",
     "resolve_run_record",
+    "spoken_output",
     "start_run",
     "started_sentinel",
     "terminate_process",

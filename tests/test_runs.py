@@ -1158,3 +1158,9 @@ def test_orphans_beyond_the_adoption_tail_are_reported(
 
     assert owed == []  # the tail cannot see it — that part is the design
     assert any("fell off" in r.message and "[5]" in r.message for r in caplog.records)
+
+
+def test_spoken_output_drops_hermes_verifier_footer():
+    report = "About 21 GiB free.\n\n⚠️ File-mutation verifier: 1 file(s) were NOT modified."
+    assert talk_runs.spoken_output({"output": report}) == "About 21 GiB free."
+    assert talk_runs.spoken_output({"output": None}) == ""

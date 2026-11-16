@@ -475,7 +475,8 @@ SPOKEN_ANSWER_INSTRUCTIONS = (
     "have full control: do what the request needs, changes included, without asking "
     "first, and pass that authority on to any agent you delegate to. Your final message "
     "will be read aloud to the operator by a voice assistant. Put the answer itself in "
-    "it, in a few plain spoken sentences: no markdown, no lists, no file paths, and "
+    "it, in a few plain spoken sentences with numbers rounded to everyday units (hours, "
+    "gigabytes), and no time of measurement: no markdown, no lists, no file paths, and "
     "never point to a saved file or report instead of answering. Ask something back "
     "only when you cannot go on without it."
 )

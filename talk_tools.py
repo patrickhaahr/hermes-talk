@@ -605,7 +605,7 @@ def _handle_check_work(arguments: dict) -> str:
         ):
             # Read out here, so its own announcement must not say it again.
             talk_runs.mark_delivered(wanted, claimant=CHECK_WORK_CLAIMANT)
-        body = run.get("output") or "still working"
+        body = talk_runs.spoken_output(run) or "still working"
         return f"{_describe_run(run)}, {run.get('label')}: {body}"
 
     # include_history so a run from a PREVIOUS session surfaces as `lost`
