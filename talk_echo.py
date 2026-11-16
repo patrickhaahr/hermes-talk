@@ -681,6 +681,20 @@ def say_commands(text: str) -> list:
     ]
 
 
+def time_event() -> bytes:
+    """This host's clock and zone for the Echo, which has no other source in Wyoming mode.
+
+    After a power loss its clock restarts in 2010 and every TLS call fails, so it
+    is sent on each link. The zone is the POSIX rule that ends a TZif file.
+    """
+
+    try:
+        tz = Path("/etc/localtime").read_bytes().rstrip(b"\n").rsplit(b"\n", 1)[-1].decode("ascii")
+    except (OSError, UnicodeDecodeError):
+        tz = ""
+    return encode_event("time", {"epoch": int(time.time()), "tz": tz})
+
+
 def say_socket_path() -> Path:
     try:
         from . import talk_config
@@ -735,6 +749,7 @@ async def _linked(
 
     writer.write(encode_event("describe"))
     writer.write(encode_event("run-satellite"))
+    writer.write(time_event())
     await writer.drain()
     standby()
     says = loop.create_task(forward_says()) if say_queue is not None else None

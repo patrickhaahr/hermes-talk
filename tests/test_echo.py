@@ -5,6 +5,7 @@ from __future__ import annotations
 import array
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -263,7 +264,8 @@ def test_wake_word_runs_a_session_on_the_echo_and_hands_it_back_when_quiet(monke
 
     received = asyncio.run(go())
     types = [e.type for e in received]
-    assert types[:2] == ["describe", "run-satellite"]
+    assert types[:3] == ["describe", "run-satellite", "time"]
+    assert abs(received[2].data["epoch"] - time.time()) < 60  # the Echo's only clock source
     assert types.index("audio-start") < types.index("audio-chunk") < types.index("audio-stop")
     assert sum(len(e.payload) for e in received if e.type == "audio-chunk") == len(_ms(50))
     assert json.loads(json.dumps(received[types.index("audio-start")].data))["rate"] == 24000
