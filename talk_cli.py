@@ -1737,7 +1737,9 @@ async def run_talk_session(
         host_execution=host_execution_attachment is not None,
         lane=lane,
         host_summary=_host_summary_line() if lane == "cli" else None,
-        capabilities=talk_capabilities.instruction_section(catalog_snapshot),
+        capabilities=None
+        if lane == "echo"
+        else talk_capabilities.instruction_section(catalog_snapshot),
     )
 
     # Find out NOW whether the api_server lane is up. The verdict is needed by

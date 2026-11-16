@@ -473,6 +473,9 @@ def default_talk_tools(*, pausable: bool = False, hangable: bool = False) -> lis
     if pausable:
         tools.append(_TOOL_PAUSE_VOICE_INPUT)
     if hangable:
+        # The room speaker answers "what can you do" in one line from its lane rule;
+        # with the catalog tool, a misheard fragment became a minute-long recital.
+        tools.remove(_TOOL_TALK_CAPABILITIES)
         tools.extend([talk_echo.END_CALL_TOOL, talk_echo.NOT_FOR_ME_TOOL])
     if talk_home.available():
         tools.insert(1, talk_home.TOOL)
@@ -496,6 +499,8 @@ def execute_talk_tool(name: str, arguments: dict | None) -> str:
     except Exception as exc:  # noqa: BLE001 — the model speaks the failure
         _log.warning("talk tool %s failed: %s: %s", name, type(exc).__name__, exc)
         return f"{name} failed: {type(exc).__name__}: {exc}"
+    if name == "home_control" and not talk_home.worked(output):
+        _log.warning("home_control: %s", output)
     return (output or "(no output)")[:MAX_OUTPUT_CHARS]
 
 

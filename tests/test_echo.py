@@ -612,6 +612,9 @@ def test_end_call_is_offered_only_to_a_surface_that_can_hang_up():
 
     assert {"end_call", "not_for_me"} <= set(names(hangable=True))
     assert not {"end_call", "not_for_me"} & set(names())
+    # A misheard room fragment once made the speaker recite the whole skill catalog.
+    assert "talk_capabilities" in names()
+    assert "talk_capabilities" not in names(hangable=True)
     assert talk_tools._HANDLERS["end_call"] is talk_echo.run_end_call
     assert {"end_call", "not_for_me"} <= talk_operator_auth.READ_ONLY_TALK_TOOLS
 
