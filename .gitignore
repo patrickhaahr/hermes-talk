@@ -18,3 +18,5 @@ node_modules/
 uv.lock
 .hermes-*-review.md
 .hermes-*-tdd.md
+scripts/echo-bench/e2e-clips/
+scripts/echo-bench/e2e-out*/
