@@ -27,7 +27,10 @@ COMMANDS = (
     "lights: on or off. tv: power (it toggles, so it serves both on and "
     "off), volume-up, volume-down, mute, input, hdmi-1, hdmi-2, hdmi-3, "
     "home, back, ok, up, down, left, right, channel-up, channel-down. "
-    "speaker: power, volume-up, volume-down, mute, bluetooth, optical."
+    "speaker: power, volume-up, volume-down, mute, bluetooth, optical (the TV's sound). "
+    "Danish works the same: 'tænd/sluk lyset' is lights on/off, 'tænd/sluk TV' is tv "
+    "power, 'skru op/ned' is volume-up/down, 'skift højtaler til TV' or 'til optical' "
+    "is speaker optical, and 'skift højtaler til bluetooth' is speaker bluetooth."
 )
 
 DONE_PREFIX = "done: "

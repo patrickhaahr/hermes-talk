@@ -30,6 +30,24 @@ def test_session_payload_enables_server_vad_and_barge_in():
     assert payload["audio"]["output"]["voice"] == "cedar"
 
 
+def test_room_speaker_input_settings_come_from_the_environment(monkeypatch):
+    """A far-field speaker in a bilingual home: room noise reduction, the languages named."""
+
+    def audio_input():
+        return talk_wire.build_session_payload(instructions="x")["audio"]["input"]
+
+    assert audio_input()["noise_reduction"] == {"type": "near_field"}
+    assert set(audio_input()["transcription"]) == {"model"}
+
+    monkeypatch.setenv("TALK_NOISE_REDUCTION", "far_field")
+    monkeypatch.setenv("TALK_LANGUAGES", "English, Danish")
+    assert audio_input()["noise_reduction"] == {"type": "far_field"}
+    assert "English or Danish" in audio_input()["transcription"]["prompt"]
+
+    monkeypatch.setenv("TALK_NOISE_REDUCTION", "off")
+    assert audio_input()["noise_reduction"] is None
+
+
 def test_turn_detection_encoder_has_exact_native_server_and_semantic_shapes():
     expected_server = {
         "type": "server_vad",

@@ -15,6 +15,7 @@ Invariants carried from the source system:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import httpx
@@ -96,6 +97,26 @@ def encode_turn_detection(
     raise ValueError(f"unsupported OpenAI turn detection mode: {mode!r}")
 
 
+def _input_audio_settings() -> dict:
+    """Noise reduction and the transcriber's language hint, from the environment.
+
+    The defaults suit a headset; a room speaker sets TALK_NOISE_REDUCTION=far_field
+    (or off), and a home that speaks only some languages lists them in
+    TALK_LANGUAGES, or the transcriber guesses among all of them on every noise.
+    """
+
+    mode = os.environ.get("TALK_NOISE_REDUCTION", "near_field").strip().lower()
+    transcription: dict = {"model": INPUT_TRANSCRIPTION_MODEL}
+    languages = [x.strip() for x in os.environ.get("TALK_LANGUAGES", "").split(",") if x.strip()]
+    if languages:
+        named = " or ".join(languages)
+        transcription["prompt"] = f"The speaker talks {named}; transcribe it in {named} only."
+    return {
+        "noise_reduction": None if mode == "off" else {"type": mode},
+        "transcription": transcription,
+    }
+
+
 def build_session_payload(
     *,
     model: str = DEFAULT_TALK_MODEL,
@@ -117,12 +138,11 @@ def build_session_payload(
 
     audio: dict = {
         "input": {
-            "noise_reduction": {"type": "near_field"},
             "turn_detection": encode_turn_detection(
                 turn_detection,
                 automatic_response=automatic_response,
             ),
-            "transcription": {"model": INPUT_TRANSCRIPTION_MODEL},
+            **_input_audio_settings(),
         },
     }
     if not text_output:
