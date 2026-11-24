@@ -1,4 +1,4 @@
-"""Wake-tail and fragment E2E: the Echo must stay quiet for scraps and still take the real request.
+"""Wake-tail and fragment E2E: scraps get at most a "Sorry?" and no run, and the Echo must still take the real request.
   e2e_noise.py OUTDIR [TALK_ECHO_DIR_OVERRIDE unused]
 """
 import asyncio, sys, time, os

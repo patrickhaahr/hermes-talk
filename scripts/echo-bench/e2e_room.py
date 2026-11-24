@@ -15,7 +15,6 @@ def stub(n):
     def f(a):
         acts.append((n, a))
         if n == "home_control": return f"done: {a.get('device')} {a.get('command')}"
-        if n == "not_for_me": return "Ignored; still listening."
         return "WORK_STARTED: run 1" if n == "delegate_task" else "Nothing."
     return f
 for n in real:

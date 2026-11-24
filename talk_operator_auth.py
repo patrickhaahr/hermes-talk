@@ -58,7 +58,6 @@ READ_ONLY_TALK_TOOLS = frozenset(
         "talk_capabilities",
         "pause_voice_input",
         "end_call",
-        "not_for_me",
     }
 )
 MUTATING_TALK_TOOLS = frozenset(

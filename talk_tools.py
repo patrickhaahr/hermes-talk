@@ -476,7 +476,7 @@ def default_talk_tools(*, pausable: bool = False, hangable: bool = False) -> lis
         # The room speaker answers "what can you do" in one line from its lane rule;
         # with the catalog tool, a misheard fragment became a minute-long recital.
         tools.remove(_TOOL_TALK_CAPABILITIES)
-        tools.extend([talk_echo.END_CALL_TOOL, talk_echo.NOT_FOR_ME_TOOL])
+        tools.append(talk_echo.END_CALL_TOOL)
     if talk_home.available():
         tools.insert(1, talk_home.TOOL)
     try:
@@ -901,7 +901,6 @@ _SCRIPTED_REPLIES = {
     "home_control": lambda output: "" if talk_home.worked(output) else None,
     "delegate_task": lambda output: HANDOFF_REPLY if output.startswith("WORK_STARTED") else None,
     "end_call": lambda output: "" if output == talk_echo.HANGING_UP else None,
-    "not_for_me": lambda output: "",
 }
 
 
@@ -915,7 +914,6 @@ def scripted_reply(name: str, output: str) -> str | None:
 _HANDLERS = {
     "home_control": talk_home.run,
     "end_call": talk_echo.run_end_call,
-    "not_for_me": talk_echo.run_not_for_me,
     "search_memory": _handle_search_memory,
     "search_vault": _handle_search_vault,
     "delegate_task": _handle_delegate_task,
