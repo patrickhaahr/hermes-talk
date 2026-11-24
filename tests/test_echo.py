@@ -39,7 +39,7 @@ def _heard(audio: EchoAudio, pcm: bytes) -> bool:
     """Whether the session hears any of this chunk, once it is through the gate's delay."""
 
     audio.feed_microphone(pcm)
-    for _ in range(talk_echo.GATE_ONSET_CHUNKS + talk_echo.GATE_HANG_CHUNKS + 1):
+    for _ in range(20):
         audio.feed_microphone(bytes(len(pcm)))
     heard = b""
     while (chunk := audio.read_input_chunk()) is not None:
@@ -200,10 +200,10 @@ def test_quiet_timer_counts_speech_and_playback_not_silence():
 
 def test_microphone_is_held_until_read_and_dropped_while_paused():
     audio = EchoAudio(lambda _: None, clock=Clock())
-    audio.feed_microphone(_pcm([0] * 1001))
-    assert (
-        len(audio.read_input_chunk()) == 3000
-    )  # 1001 samples at 16 kHz: 1500 at 24 kHz, one carried
+    audio.feed_microphone(_pcm([0] * 1024))
+    assert audio.read_input_chunk() is None  # one sample short of a frame: the upsampler carries it
+    audio.feed_microphone(_pcm([0] * 1024))
+    assert len(audio.read_input_chunk()) == talk_echo.GATE_FRAME_BYTES
     assert audio.read_input_chunk() is None
     audio.pause_input()
     audio.feed_microphone(_pcm([0] * 1000))
@@ -256,7 +256,7 @@ def test_wake_word_runs_a_session_on_the_echo_and_hands_it_back_when_quiet(monke
                         encode_event("run-pipeline", {"start_stage": "asr", "end_stage": "tts"})
                     )
                     for _ in range(2):
-                        writer.write(encode_event("audio-chunk", {"rate": 16000}, _pcm([0] * 1024)))
+                        writer.write(encode_event("audio-chunk", {"rate": 16000}, _pcm([0] * 1600)))
                     await writer.drain()
                 if event.type == "audio-stop":
                     done.set()
@@ -364,7 +364,7 @@ async def _until(predicate):
 
 def _wake(writer):
     writer.write(encode_event("run-pipeline", {"start_stage": "asr", "end_stage": "tts"}))
-    writer.write(encode_event("audio-chunk", {"rate": 16000}, _pcm([0] * 1024)))
+    writer.write(encode_event("audio-chunk", {"rate": 16000}, _pcm([0] * 1600)))
 
 
 def test_a_standby_session_is_connected_before_the_wake_word_and_takes_the_call(monkeypatch):
@@ -652,20 +652,29 @@ def test_a_standby_taking_the_call_learns_the_time_it_started():
     assert talk_identity.current_moment() in batch[0].text
 
 
-def _chunks_heard(levels):
+def _frames_heard(levels, piece_bytes):
     gate = talk_echo.TalkerGate()
-    out = [gate.feed(bytes([i + 1]) * 2, level) for i, level in enumerate(levels)]
-    assert all(len(chunk) == 2 for chunk in out)
-    return [chunk[0] - 1 for chunk in out if any(chunk)]
+    frame_samples = talk_echo.GATE_FRAME_BYTES // 2
+    pcm = b"".join(_pcm([round(level * 32768)] * frame_samples) for level in levels)
+    pieces = [pcm[i : i + piece_bytes] for i in range(0, len(pcm), piece_bytes)]
+    heard = b"".join(gate.feed(piece) for piece in pieces)
+    size = talk_echo.GATE_FRAME_BYTES
+    assert len(heard) == len(pcm) // size * size
+    return [i // size - talk_echo.GATE_ONSET_FRAMES for i in range(0, len(heard), size)
+            if any(heard[i : i + size])]
 
 
-def test_the_room_behind_the_talker_is_silenced_and_words_keep_their_edges():
+HASSMIC_PIECE = 768  # 16 ms, what the Echo 2 sends
+
+
+@pytest.mark.parametrize("piece", [HASSMIC_PIECE, 1000, 3072])
+def test_the_room_behind_the_talker_is_silenced_and_words_keep_their_edges(piece):
     music, word = 0.011, 0.05
-    assert _chunks_heard([music] * 10 + [word] * 3 + [music] * 12) == list(range(8, 17))
+    assert _frames_heard([music] * 10 + [word] * 3 + [music] * 12, piece) == list(range(8, 17))
 
 
 def test_a_soft_command_is_heard_in_a_quiet_room_and_the_same_level_of_music_is_not():
     quiet, soft = 0.003, 0.015
-    assert _chunks_heard([quiet] * 10 + [soft] * 3 + [quiet] * 12) == list(range(8, 17))
+    assert _frames_heard([quiet] * 10 + [soft] * 3 + [quiet] * 12, HASSMIC_PIECE) == list(range(8, 17))
     music = 0.011
-    assert _chunks_heard([music] * 10 + [soft] * 3 + [music] * 12) == []
+    assert _frames_heard([music] * 10 + [soft] * 3 + [music] * 12, HASSMIC_PIECE) == []

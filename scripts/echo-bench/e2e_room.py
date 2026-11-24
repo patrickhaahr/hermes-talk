@@ -20,7 +20,7 @@ def stub(n):
     return f
 for n in real:
     if n != "end_call": tt._HANDLERS[n] = stub(n)
-WANT = {"lights_on": ("lights","on"), "lights_off": ("lights","off"), "tv_on": ("tv","power"), "spk_bt": ("speaker","bluetooth"), "lys_off": ("lights","off")}
+WANT = {"lights_on": ("lights","on"), "lights_off": ("lights","off"), "tv_on": ("tv","power"), "spk_bt": ("speaker","bluetooth"), "lys_off": ("lights","off"), "lys_on": ("lights","on")}
 async def one(name):
     acts.clear()
     echo = E["Echo"]()

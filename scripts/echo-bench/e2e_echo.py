@@ -19,7 +19,7 @@ from talk_echo import encode_event, read_event
 OUT = Path(sys.argv[1]); OUT.mkdir(parents=True, exist_ok=True)
 CLIPS = Path(__file__).parent / "e2e-clips"
 SESSION = "talk-echo-bench"
-CHUNK = 1024                      # samples per hassmic mic chunk at 16 kHz
+CHUNK = 256                       # samples per hassmic mic chunk at 16 kHz
 CHUNK_S = CHUNK / 16000
 
 talk_echo.RETURN_SESSION_ID = SESSION
