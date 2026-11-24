@@ -127,10 +127,11 @@ STANDBY_RETRY_MAX_S = 60.0
 #: the Echo is silent, never sooner than this: a goodbye a moment late still plays.
 HANG_UP_MIN_S = 0.5
 HANG_UP_MAX_S = 10.0
-#: After a handoff the operator may go on to the next command: the call closes
-#: once nothing was heard for this long.
-HANDOFF_QUIET_S = 2.5
-HANDOFF_MAX_S = 30.0
+#: After a handoff the operator may go on to the next command, and "On it." said
+#: at once made the Echo deaf to it: it is said, and the call closes, once nothing
+#: was heard for this long.
+HANDOFF_REPLY = "On it."
+HANDOFF_QUIET_S = 3.0
 #: Talked over, the reply never plays.
 REPLY_COMES_WITHIN_S = 5.0
 #: The model hung up on a misheard "TV", so a goodbye must also be in what the
@@ -370,6 +371,7 @@ class EchoAudio:
         self._on_speech = on_speech
         self._hang_up_at: float | None = None
         self._hang_up_after_reply = False
+        self._handed_off_at: float | None = None
         self._passed_at = self._said_goodbye_at = float("-inf")
         self._barge_in_level = barge_in_level
         self._gate = TalkerGate()
@@ -504,9 +506,24 @@ class EchoAudio:
         self.mark_activity()
 
     def request_hang_up(self, *, after_reply: bool = False) -> None:
-        if after_reply or self._hang_up_at is None:
+        if self._hang_up_at is None:
             self._hang_up_at = self._clock()
             self._hang_up_after_reply = after_reply
+
+    def handed_off(self) -> None:
+        self._handed_off_at = self._clock()
+
+    def take_settled_handoff(self) -> bool:
+        """Once per handoff: the operator has gone quiet after it."""
+
+        if self._handed_off_at is None or self._hang_up_at is not None:
+            return False
+        with self._lock:
+            quiet_since = max(self._handed_off_at, self._passed_at, self._sent_until)
+        if self._clock() - quiet_since < HANDOFF_QUIET_S:
+            return False
+        self._handed_off_at = None
+        return True
 
     def operator_said(self, transcript: str) -> None:
         if GOODBYE.search(transcript):
@@ -528,9 +545,7 @@ class EchoAudio:
             )
             if self._hang_up_after_reply:
                 replied = self._sent_until > self._hang_up_at or waited >= REPLY_COMES_WITHIN_S
-                quiet = self._clock() - self._passed_at >= HANDOFF_QUIET_S
-                settled = self._clock() - self._sent_until >= HANDOFF_QUIET_S
-                return waited >= HANDOFF_MAX_S or (replied and silent and quiet and settled)
+                silent = silent and replied
         return waited >= HANG_UP_MAX_S or (waited >= HANG_UP_MIN_S and silent)
 
     def quiet_s(self) -> float:
@@ -759,6 +774,9 @@ class _Conversation:
         born, born_wall = loop.time(), time.time()
         while not self._session.done():
             if self.active:
+                if self.audio.take_settled_handoff():
+                    self.audio.request_hang_up(after_reply=True)
+                    self.announcements.put_nowait(handoff_commands())
                 if self.audio.hung_up():
                     _log.info("echo: hanging up, ending the session")
                     await self.audio.play_out(BYE_TONE)
@@ -848,11 +866,27 @@ def run_end_call(arguments: dict) -> str:
     return HANGING_UP
 
 
-def hang_up_after_reply() -> None:
-    """End the live call, if any, once the reply still to come has been said."""
+def in_call() -> bool:
+    return _calling is not None
+
+
+def handed_off() -> None:
+    """The live call, if any, says so and closes once the operator is quiet."""
 
     if _calling is not None:
-        _calling.request_hang_up(after_reply=True)
+        _calling.handed_off()
+
+
+def handoff_commands() -> list:
+    try:
+        from . import talk_realtime
+    except ImportError:  # pragma: no cover - flat-module fallback
+        import talk_realtime
+    return [talk_realtime.StartResponse(
+        allow_tools=False,
+        input=(),
+        instructions=f"Say exactly '{HANDOFF_REPLY}' and nothing else.",
+    )]
 
 
 def clock_commands() -> list:

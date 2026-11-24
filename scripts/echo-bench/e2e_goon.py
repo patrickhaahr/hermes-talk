@@ -1,9 +1,10 @@
-"""A handoff, then more commands at once: the call must stay for them and close after.
+"""A handoff, then more commands: the call must stay for them and close after.
 
 Also counts real goodbyes that end the call. Tools are stubbed.
   e2e_goon.py OUTDIR ROUNDS
 """
-import asyncio, sys
+import asyncio, logging, sys
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 import e2e_echo as E
 from e2e_echo import log
 

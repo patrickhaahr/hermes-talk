@@ -528,8 +528,8 @@ def execute_talk_tool(name: str, arguments: dict | None) -> str:
         return f"{name} failed: {type(exc).__name__}: {exc}"
     if name == "home_control" and not talk_home.worked(output):
         _log.warning("home_control: %s", output)
-    if name == "delegate_task" and scripted_reply(name, output) == HANDOFF_REPLY:
-        talk_echo.hang_up_after_reply()
+    if name == "delegate_task" and output.startswith("WORK_STARTED"):
+        talk_echo.handed_off()
     return (output or "(no output)")[:MAX_OUTPUT_CHARS]
 
 
@@ -919,16 +919,19 @@ def _handle_talk_capabilities(arguments: dict) -> str:
     return rendered
 
 
-HANDOFF_REPLY = "On it."
+def _handoff_reply() -> str:
+    return "" if talk_echo.in_call() else talk_echo.HANDOFF_REPLY
+
 
 #: What the speaker says after a tool result instead of a free reply, "" for
 #: nothing: the operator sees the lights switch, the goodbye was said before
 #: the hang-up, and a handoff gets the same two words every time (its result
-#: is spoken when it lands). Left to the model, a handoff became "It's running
-#: and I'll summarize what it finds", or nothing at all.
+#: is spoken when it lands), which the Echo holds until the operator is quiet.
+#: Left to the model, a handoff became "It's running and I'll summarize what it
+#: finds", or nothing at all.
 _SCRIPTED_REPLIES = {
     "home_control": lambda output: "" if talk_home.worked(output) else None,
-    "delegate_task": lambda output: HANDOFF_REPLY if output.startswith("WORK_STARTED") else None,
+    "delegate_task": lambda output: _handoff_reply() if output.startswith("WORK_STARTED") else None,
     "end_call": lambda output: "" if output == talk_echo.HANGING_UP else None,
 }
 

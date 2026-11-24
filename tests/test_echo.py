@@ -553,7 +553,7 @@ def test_end_call_waits_for_the_goodbye_then_hangs_up():
     assert audio.hung_up()
 
 
-def test_a_handoff_hangs_up_only_once_its_reply_has_played(monkeypatch):
+def test_a_handoff_is_acknowledged_and_closed_once_the_operator_is_quiet(monkeypatch):
     import talk_tools
 
     clock = Clock()
@@ -563,24 +563,29 @@ def test_a_handoff_hangs_up_only_once_its_reply_has_played(monkeypatch):
     monkeypatch.setitem(talk_tools._HANDLERS, "delegate_task", lambda a: started[a["task"]])
 
     talk_tools.execute_talk_tool("delegate_task", {"task": "refused"})
-    clock.now += talk_echo.HANG_UP_MAX_S
-    assert not audio.hung_up(), "nothing was handed off"
+    clock.now += talk_echo.HANDOFF_QUIET_S
+    assert not audio.take_settled_handoff(), "nothing was handed off"
 
-    talk_tools.execute_talk_tool("delegate_task", {"task": "ok"})
+    assert talk_tools.scripted_reply(
+        "delegate_task", talk_tools.execute_talk_tool("delegate_task", {"task": "ok"})
+    ) == "", "'On it.' would cover the next command"
+    clock.now += talk_echo.HANDOFF_QUIET_S - 0.5
+    for _ in range(60):
+        audio.feed_microphone(_pcm([9000, -9000] * 128))
+        clock.now += 0.016
+    clock.now += talk_echo.HANDOFF_QUIET_S - 0.5
+    assert not audio.take_settled_handoff(), "the operator went on"
+    clock.now += 0.6
+    assert audio.take_settled_handoff()
+    assert not audio.take_settled_handoff(), "said once"
+
+    audio.request_hang_up(after_reply=True)
     clock.now += talk_echo.HANG_UP_MIN_S * 3
     assert not audio.hung_up(), "'On it.' has not been said yet"
     audio.queue_playback(_ms(400), "on-it")
     audio.pace_once()
-    assert not audio.hung_up()
     audio.drain_playback()
-    clock.now += talk_echo.HANDOFF_QUIET_S - 0.5
-    assert not audio.hung_up(), "there is time to go on"
-    for _ in range(40):
-        audio.feed_microphone(_pcm([9000, -9000] * 128))
-        clock.now += 0.016
-    clock.now += talk_echo.HANDOFF_QUIET_S - 0.3
-    assert not audio.hung_up(), "the operator went on"
-    clock.now += 0.5 + talk_echo.PLAYBACK_LEAD_S
+    clock.now += talk_echo.PLAYBACK_LEAD_S + talk_echo.ECHO_TAIL_S
     assert audio.hung_up()
 
 
