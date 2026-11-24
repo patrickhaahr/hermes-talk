@@ -40,7 +40,7 @@ def _heard(audio: EchoAudio, pcm: bytes) -> bool:
 
     audio.feed_microphone(pcm)
     for _ in range(20):
-        audio.feed_microphone(bytes(len(pcm)))
+        audio.feed_microphone(bytes(1280))
     heard = b""
     while (chunk := audio.read_input_chunk()) is not None:
         heard += chunk
@@ -331,7 +331,7 @@ def test_wake_word_during_the_reply_stops_it_and_opens_the_microphone():
     assert not audio.playback_pending
     audio.queue_playback(_ms(500), "reply")  # the rest of it, still streaming in
     assert not audio.playback_pending
-    assert _heard(audio, _pcm([4000, -4000] * 501))  # "stop", over what the Echo still plays
+    assert _heard(audio, _pcm([4000, -4000] * 2000))  # "stop", over what the Echo still plays
 
     assert audio.drain_playback()[0] == "reply", "the session still learns what was heard"
     audio.queue_playback(_ms(500), "next")
@@ -671,6 +671,10 @@ HASSMIC_PIECE = 768  # 16 ms, what the Echo 2 sends
 def test_the_room_behind_the_talker_is_silenced_and_words_keep_their_edges(piece):
     music, word = 0.011, 0.05
     assert _frames_heard([music] * 10 + [word] * 3 + [music] * 12, piece) == list(range(8, 17))
+
+
+def test_a_single_knock_does_not_open_the_gate():
+    assert _frames_heard([0.003] * 10 + [0.3] + [0.003] * 12, HASSMIC_PIECE) == []
 
 
 def test_a_soft_command_is_heard_in_a_quiet_room_and_the_same_level_of_music_is_not():

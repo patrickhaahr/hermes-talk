@@ -73,7 +73,7 @@ MAX_PLAYBACK_BYTES = talk_audio.MAX_PLAYBACK_BYTES
 #: quiet timer only. hassmic brings speech to about -26 dBFS (0.05).
 SPEECH_LEVEL = 0.02
 GATE_FRAME_BYTES = int(RATE * 0.064) * FRAME_BYTES
-GATE_ONSET_FRAMES = 2
+GATE_ONSET_FRAMES = 3
 GATE_HANG_FRAMES = 4
 GATE_LEVEL_MIN = 0.0126
 GATE_LEVEL_MAX = SPEECH_LEVEL
@@ -248,13 +248,15 @@ class TalkerGate:
     Left in, the room keeps the provider's turn from ending or is answered as a
     request. The stream runs GATE_ONSET_FRAMES late so a word keeps its onset.
     The level that opens it follows the room: low in a quiet one, so a command
-    said more softly than the wake word is still heard.
+    said more softly than the wake word is still heard. A single loud frame is a
+    knock, not a word.
     """
 
     def __init__(self) -> None:
         self._partial = bytearray()
         self._held: deque[bytes] = deque()
         self._open_frames = 0
+        self._was_loud = False
         self._recent: deque[float] = deque(maxlen=GATE_ROOM_FRAMES)
 
     def _opening_level(self) -> float:
@@ -275,8 +277,10 @@ class TalkerGate:
     def _frame(self, frame: bytes) -> bytes:
         level = talk_audio._pcm16_rms(frame)
         self._held.append(frame)
-        if level >= self._opening_level():
+        loud = level >= self._opening_level()
+        if loud and (self._was_loud or self._open_frames):
             self._open_frames = GATE_ONSET_FRAMES + GATE_HANG_FRAMES + 1
+        self._was_loud = loud
         self._recent.append(level)
         due = bytes(GATE_FRAME_BYTES)
         if len(self._held) > GATE_ONSET_FRAMES:
@@ -754,7 +758,8 @@ def clock_commands() -> list:
         import talk_realtime
     return [talk_realtime.AddContext(
         item_id=f"talkclock{uuid.uuid4().hex[:20]}",
-        text=f"The call starts now. {talk_identity.current_moment()}",
+        text=f"The call starts now. {talk_identity.current_moment()} "
+        "This is only for when the operator asks the time or date.",
     )]
 
 
