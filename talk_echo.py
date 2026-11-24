@@ -27,6 +27,7 @@ import json
 import logging
 import math
 import os
+import re
 import socket
 import statistics
 import threading
@@ -126,6 +127,23 @@ STANDBY_RETRY_MAX_S = 60.0
 #: the Echo is silent, never sooner than this: a goodbye a moment late still plays.
 HANG_UP_MIN_S = 0.5
 HANG_UP_MAX_S = 10.0
+#: After a handoff the operator may go on to the next command: the call closes
+#: once nothing was heard for this long.
+HANDOFF_QUIET_S = 2.5
+HANDOFF_MAX_S = 30.0
+#: Talked over, the reply never plays.
+REPLY_COMES_WITHIN_S = 5.0
+#: The model hung up on a misheard "TV", so a goodbye must also be in what the
+#: transcriber heard, which can arrive a little after end_call. "Farvel" has
+#: been written "Tovel" and "Forvel farve".
+GOODBYE = re.compile(
+    r"\b(?:good)?bye\b|\bbaj\b|\b(?:f[ao]r|to|f[ao])\s?vel\b|\bhej[\s-]+hej\b"
+    r"|\bthat['\u2019]?s (?:all|it)\b|\bdet var det\b|\bstop\b|\bhang up\b|\blæg på\b"
+    r"|\bvi ses\b|\bgood ?night\b|\bgod ?nat\b",
+    re.IGNORECASE,
+)
+GOODBYE_RECENT_S = 6.0
+GOODBYE_WAIT_S = 1.5
 #: ``hermes talk echo-say`` reaches the running surface through this socket,
 #: under the Hermes home (only its owner may connect).
 SAY_SOCKET = "talk-echo.sock"
@@ -352,6 +370,7 @@ class EchoAudio:
         self._on_speech = on_speech
         self._hang_up_at: float | None = None
         self._hang_up_after_reply = False
+        self._passed_at = self._said_goodbye_at = float("-inf")
         self._barge_in_level = barge_in_level
         self._gate = TalkerGate()
         self._levels: dict[bool, list[float]] = {True: [], False: []}
@@ -423,6 +442,8 @@ class EchoAudio:
             pcm = self._gate.feed(pcm)
             if not pcm:
                 return
+            if pcm.strip(b"\0"):
+                self._passed_at = now
             self._input.append(pcm)
             self._input_bytes += len(pcm)
             # Newest audio wins, as on the terminal: stale speech corrupts the turn.
@@ -483,9 +504,16 @@ class EchoAudio:
         self.mark_activity()
 
     def request_hang_up(self, *, after_reply: bool = False) -> None:
-        if self._hang_up_at is None:
+        if after_reply or self._hang_up_at is None:
             self._hang_up_at = self._clock()
             self._hang_up_after_reply = after_reply
+
+    def operator_said(self, transcript: str) -> None:
+        if GOODBYE.search(transcript):
+            self._said_goodbye_at = self._clock()
+
+    def said_goodbye(self) -> bool:
+        return self._clock() - self._said_goodbye_at <= GOODBYE_RECENT_S
 
     def hung_up(self) -> bool:
         """A hang-up was asked for, and what is said before it has played (or never came)."""
@@ -499,7 +527,10 @@ class EchoAudio:
                 and self._sent_until + ECHO_TAIL_S <= self._clock()
             )
             if self._hang_up_after_reply:
-                silent = silent and self._sent_until > self._hang_up_at
+                replied = self._sent_until > self._hang_up_at or waited >= REPLY_COMES_WITHIN_S
+                quiet = self._clock() - self._passed_at >= HANDOFF_QUIET_S
+                settled = self._clock() - self._sent_until >= HANDOFF_QUIET_S
+                return waited >= HANDOFF_MAX_S or (replied and silent and quiet and settled)
         return waited >= HANG_UP_MAX_S or (waited >= HANG_UP_MIN_S and silent)
 
     def quiet_s(self) -> float:
@@ -781,8 +812,8 @@ END_CALL_TOOL: dict = {
     "name": "end_call",
     "description": (
         "Hang up this call on the Echo. Use it when the operator says goodbye, "
-        "says that is all, or asks you to stop listening. Say only 'Bye.' first, in "
-        "the same turn; nothing is said after it, and the call closes once it is heard."
+        "says that is all, or asks you to stop listening. Say nothing "
+        "before or after it: the call closes with a tone."
     ),
     "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
 }
@@ -796,13 +827,23 @@ def note_action(what: str) -> None:
                   what[:120], _calling.since_spoke())
 
 
-HANGING_UP = "Hanging up after your goodbye."
+HANGING_UP = "Hanging up after the operator's goodbye."
+NO_GOODBYE = (
+    "The operator said no goodbye, so the call stays open. A short sound like 'CV' is 'TV': "
+    "run what they asked for if you are sure of it, otherwise say only 'Sorry?'."
+)
 
 
 def run_end_call(arguments: dict) -> str:
     audio = _calling
     if audio is None:
         return "There is no call on the Echo to end."
+    deadline = time.monotonic() + GOODBYE_WAIT_S
+    while not audio.said_goodbye():
+        if time.monotonic() >= deadline:
+            _log.info("echo: no goodbye was heard, the call stays open")
+            return NO_GOODBYE
+        time.sleep(0.05)
     audio.request_hang_up()
     return HANGING_UP
 

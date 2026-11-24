@@ -573,8 +573,31 @@ def test_a_handoff_hangs_up_only_once_its_reply_has_played(monkeypatch):
     audio.pace_once()
     assert not audio.hung_up()
     audio.drain_playback()
-    clock.now += talk_echo.PLAYBACK_LEAD_S + talk_echo.ECHO_TAIL_S
+    clock.now += talk_echo.HANDOFF_QUIET_S - 0.5
+    assert not audio.hung_up(), "there is time to go on"
+    for _ in range(40):
+        audio.feed_microphone(_pcm([9000, -9000] * 128))
+        clock.now += 0.016
+    clock.now += talk_echo.HANDOFF_QUIET_S - 0.3
+    assert not audio.hung_up(), "the operator went on"
+    clock.now += 0.5 + talk_echo.PLAYBACK_LEAD_S
     assert audio.hung_up()
+
+
+@pytest.mark.parametrize(
+    ("heard", "hangs_up"),
+    [("Farvel.", True), ("Tovel.", True), ("Forvel farve.", True), ("Thank you, bye-bye.", True),
+     ("CV.", False), ("Simba.", False), ("You...", False), ("Alright.", False), ("Hvordan?", False),
+     ("Tænd TV, tilbage.", False)],
+)
+def test_end_call_needs_a_goodbye_the_transcriber_heard_too(monkeypatch, heard, hangs_up):
+    audio = EchoAudio(lambda _: None)
+    monkeypatch.setattr(talk_echo, "_calling", audio)
+    monkeypatch.setattr(talk_echo, "GOODBYE_WAIT_S", 0.1)
+    audio.operator_said(heard)
+    reply = talk_echo.run_end_call({})
+    assert (reply == talk_echo.HANGING_UP) is hangs_up
+    assert (audio._hang_up_at is not None) is hangs_up
 
 
 def test_end_call_plays_the_goodbye_then_the_bye_tone_then_hands_back(monkeypatch):
@@ -586,6 +609,7 @@ def test_end_call_plays_the_goodbye_then_the_bye_tone_then_hands_back(monkeypatc
             while audio.read_input_chunk() is None:
                 await asyncio.sleep(0.005)
             audio.queue_playback(_ms(50), "bye")
+            audio.operator_said("Farvel.")
             talk_echo.run_end_call({})
             await asyncio.Event().wait()
         finally:

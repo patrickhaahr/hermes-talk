@@ -1856,6 +1856,8 @@ async def run_talk_session(
         # cannot tell a misheard request from a misbehaving model.
         if role == talk_realtime.TranscriptRole.USER.value:
             print(f"\n> {text}", flush=True)
+            if callable(heard := getattr(audio, "operator_said", None)):
+                heard(text)
         capture.append_turn(role, text)
 
     def on_error(text: str) -> None:
