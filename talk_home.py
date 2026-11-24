@@ -28,11 +28,14 @@ DEVICES = {"lights": ("lights",), "tv": ("ir", "lgtv"), "speaker": ("ir", "edifi
 COMMANDS = (
     "lights: on or off. tv: power (it toggles, so it serves both on and "
     "off), volume-up, volume-down, mute, input, hdmi-1, hdmi-2, hdmi-3, "
-    "home, back, ok, up, down, left, right, channel-up, channel-down. "
+    "home, back, ok, up, down, left, right, channel-up, channel-down, 1. "
     "speaker: power, volume-up, volume-down, mute, bluetooth, optical (the TV's sound). "
-    "Danish works the same: 'tænd/sluk lyset' is lights on/off, 'tænd/sluk TV' is tv "
+    "Danish works the same: 'tænd/sluk lys' or 'lyset' is lights on/off, 'tænd/sluk TV' is tv "
     "power, 'skru op/ned' is volume-up/down, 'skift højtaler til TV' or 'til optical' "
-    "is speaker optical, and 'skift højtaler til bluetooth' is speaker bluetooth."
+    "is speaker optical, and 'skift højtaler til bluetooth' is speaker bluetooth. One word "
+    "is enough: 'YouTube' is tv 1, 'play' is tv ok, 'tilbage' is tv back (never power), "
+    "'TV' is tv power, and 'mute', 'bluetooth' and 'optical' "
+    "are the speaker."
 )
 
 DONE_PREFIX = "done: "

@@ -418,7 +418,10 @@ def test_a_standby_session_is_connected_before_the_wake_word_and_takes_the_call(
     assert [e.type for e in received].count("audio-stop") == 1
 
 
-def test_a_standby_session_that_speaks_on_its_own_becomes_the_call(monkeypatch):
+@pytest.mark.parametrize(("wakes", "ends"), [([], True), (["run-pipeline"], False),
+                                             (["detection"], False)])
+def test_a_standby_that_speaks_on_its_own_ends_soon_unless_woken(monkeypatch, wakes, ends):
+    monkeypatch.setattr(talk_echo, "UNWOKEN_IDLE_S", 0.3)
     monkeypatch.setattr(talk_echo, "PACE_TICK_S", 0.005)
 
     async def session(*, audio, lane, announce_queue=None):
@@ -434,6 +437,9 @@ def test_a_standby_session_that_speaks_on_its_own_becomes_the_call(monkeypatch):
         stopped = asyncio.Event()
 
         async def on_event(event, writer):
+            if event.type == "audio-start":
+                for wake in wakes:
+                    writer.write(encode_event(wake))
             if event.type == "audio-stop":
                 stopped.set()
 
@@ -441,18 +447,19 @@ def test_a_standby_session_that_speaks_on_its_own_becomes_the_call(monkeypatch):
         server = await asyncio.start_server(echo, "127.0.0.1", 0)
         port = server.sockets[0].getsockname()[1]
         surface = asyncio.create_task(
-            talk_echo.serve("127.0.0.1", port, idle_s=0.2, runner=session)
+            talk_echo.serve("127.0.0.1", port, idle_s=30, runner=session)
         )
         try:
-            await asyncio.wait_for(stopped.wait(), 5)
+            await asyncio.wait({asyncio.ensure_future(stopped.wait())}, timeout=1.5)
         finally:
             surface.cancel()
             await asyncio.gather(surface, return_exceptions=True)
             server.close()
-        return [e.type for e in received]
+        return stopped.is_set(), [e.type for e in received]
 
-    types = asyncio.run(go())
-    assert types.index("audio-start") < types.index("audio-stop")
+    stopped, types = asyncio.run(go())
+    assert "audio-start" in types
+    assert stopped is ends
 
 
 def test_a_result_landing_after_the_call_restarts_the_standby_to_pick_it_up(monkeypatch):
@@ -541,6 +548,30 @@ def test_end_call_waits_for_the_goodbye_then_hangs_up():
     audio.pace_once()
     clock.now += talk_echo.HANG_UP_MIN_S
     assert not audio.hung_up(), "the goodbye is still playing"
+    audio.drain_playback()
+    clock.now += talk_echo.PLAYBACK_LEAD_S + talk_echo.ECHO_TAIL_S
+    assert audio.hung_up()
+
+
+def test_a_handoff_hangs_up_only_once_its_reply_has_played(monkeypatch):
+    import talk_tools
+
+    clock = Clock()
+    audio = EchoAudio(lambda _: None, clock=clock)
+    monkeypatch.setattr(talk_echo, "_calling", audio)
+    started = {"refused": "delegate_task needs a task", "ok": "WORK_STARTED run 1"}
+    monkeypatch.setitem(talk_tools._HANDLERS, "delegate_task", lambda a: started[a["task"]])
+
+    talk_tools.execute_talk_tool("delegate_task", {"task": "refused"})
+    clock.now += talk_echo.HANG_UP_MAX_S
+    assert not audio.hung_up(), "nothing was handed off"
+
+    talk_tools.execute_talk_tool("delegate_task", {"task": "ok"})
+    clock.now += talk_echo.HANG_UP_MIN_S * 3
+    assert not audio.hung_up(), "'On it.' has not been said yet"
+    audio.queue_playback(_ms(400), "on-it")
+    audio.pace_once()
+    assert not audio.hung_up()
     audio.drain_playback()
     clock.now += talk_echo.PLAYBACK_LEAD_S + talk_echo.ECHO_TAIL_S
     assert audio.hung_up()

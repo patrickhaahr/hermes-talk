@@ -794,9 +794,9 @@ class GeminiRealtimeSession:
             elif isinstance(command, rt.RemoveContext):
                 self._degrade_receipt("conversation context delete")
             elif isinstance(command, rt.StartResponse):
-                if command.input is not None or command.conversation is not None:
+                if command.input or command.conversation is not None:
                     raise rt.RealtimeSessionError("Gemini isolated task responses are unsupported")
-                if command.metadata or command.allow_tools is not None:
+                if command.metadata or command.allow_tools is not None or command.input == ():
                     self._degrade_receipt("per-response metadata and tool gating")
                 if not tool_result_present:
                     # Bare response trigger for the announcement flow. NOT

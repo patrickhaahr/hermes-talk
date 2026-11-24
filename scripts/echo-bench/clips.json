@@ -27,5 +27,20 @@
  {"id": "ohwow", "say": "Oh wow."},
  {"id": "hello", "say": "Hello."},
  {"id": "ja", "say": "Ja."},
- {"id": "whatcan", "say": "What can you do?"}
+ {"id": "whatcan", "say": "What can you do?"},
+ {"id": "da_tv", "say": "TV."},
+ {"id": "youtube", "say": "YouTube."},
+ {"id": "play", "say": "Play."},
+ {"id": "da_tilbage", "say": "Tilbage."},
+ {"id": "mute", "say": "Mute."},
+ {"id": "bluetooth", "say": "Bluetooth."},
+ {"id": "optical", "say": "Optical."},
+ {"id": "da_klokken", "say": "Hvad er klokken?"},
+ {"id": "da_dag", "say": "Hvilken dag er det?"},
+ {"id": "da_status", "say": "Giv mig status på homelab."},
+ {"id": "da_nyheder", "say": "Fortæl mig nyhederne i dag."},
+ {"id": "da_cando", "say": "Hvad kan du?"},
+ {"id": "en_weather", "say": "What is the weather tomorrow?"},
+ {"id": "da_taend_lys", "say": "Tænd lys."},
+ {"id": "da_sluk_lys", "say": "Sluk lys."}
 ]

@@ -53,6 +53,9 @@ LANE = "echo"
 RETURN_SESSION_ID = "talk-echo"
 DEFAULT_PORT = 16700
 DEFAULT_IDLE_S = 20.0
+#: After the Echo spoke on its own nobody has woken it: the room's noise after
+#: a result drew a "Sorry?" until the call closed soon after.
+UNWOKEN_IDLE_S = 4.0
 
 #: hassmic's microphone stream, fixed in its proto_wyoming.c.
 MIC_RATE = 16_000
@@ -348,6 +351,7 @@ class EchoAudio:
         self._clock = clock
         self._on_speech = on_speech
         self._hang_up_at: float | None = None
+        self._hang_up_after_reply = False
         self._barge_in_level = barge_in_level
         self._gate = TalkerGate()
         self._levels: dict[bool, list[float]] = {True: [], False: []}
@@ -478,12 +482,13 @@ class EchoAudio:
             self._gate.skip_wake_word()
         self.mark_activity()
 
-    def request_hang_up(self) -> None:
+    def request_hang_up(self, *, after_reply: bool = False) -> None:
         if self._hang_up_at is None:
             self._hang_up_at = self._clock()
+            self._hang_up_after_reply = after_reply
 
     def hung_up(self) -> bool:
-        """end_call was asked for, and the goodbye has been said (or never came)."""
+        """A hang-up was asked for, and what is said before it has played (or never came)."""
 
         if self._hang_up_at is None:
             return False
@@ -493,6 +498,8 @@ class EchoAudio:
                 self._queued_playback_bytes == 0
                 and self._sent_until + ECHO_TAIL_S <= self._clock()
             )
+            if self._hang_up_after_reply:
+                silent = silent and self._sent_until > self._hang_up_at
         return waited >= HANG_UP_MAX_S or (waited >= HANG_UP_MIN_S and silent)
 
     def quiet_s(self) -> float:
@@ -678,11 +685,12 @@ class _Conversation:
         *,
         active: bool = True,
     ) -> None:
-        self.audio = EchoAudio(write, barge_in_level=barge_in_level, on_speech=self.activate)
+        self.audio = EchoAudio(write, barge_in_level=barge_in_level, on_speech=self._speak_unwoken)
         self.announcements: asyncio.Queue = asyncio.Queue()
         self.active = False
         self._write = write
         self._idle_s = idle_s
+        self._unwoken = False
         self._on_end = on_end
         self._closed = False
         loop = asyncio.get_running_loop()
@@ -692,6 +700,16 @@ class _Conversation:
         self._watch = loop.create_task(self._watch_session())
         if active:
             self.activate()
+
+    def _speak_unwoken(self) -> None:
+        if not self.active:
+            self._unwoken = True
+            self.activate()
+
+    def woken(self) -> None:
+        self._unwoken = False
+        self.activate()
+        self.audio.mark_activity()
 
     def activate(self) -> None:
         global _calling
@@ -711,11 +729,12 @@ class _Conversation:
         while not self._session.done():
             if self.active:
                 if self.audio.hung_up():
-                    _log.info("echo: end_call, ending the session")
+                    _log.info("echo: hanging up, ending the session")
                     await self.audio.play_out(BYE_TONE)
                     break
-                if self.audio.quiet_s() >= self._idle_s:
-                    _log.info("echo: quiet for %.0f s, ending the session", self._idle_s)
+                idle_s = min(self._idle_s, UNWOKEN_IDLE_S) if self._unwoken else self._idle_s
+                if self.audio.quiet_s() >= idle_s:
+                    _log.info("echo: quiet for %.0f s, ending the session", idle_s)
                     break
             elif loop.time() - born >= STANDBY_REFRESH_S:
                 break
@@ -786,6 +805,13 @@ def run_end_call(arguments: dict) -> str:
         return "There is no call on the Echo to end."
     audio.request_hang_up()
     return HANGING_UP
+
+
+def hang_up_after_reply() -> None:
+    """End the live call, if any, once the reply still to come has been said."""
+
+    if _calling is not None:
+        _calling.request_hang_up(after_reply=True)
 
 
 def clock_commands() -> list:
@@ -908,12 +934,14 @@ async def _linked(
                 if current is None:
                     _log.info("echo: wake word, starting a Talk session")
                     current = _Conversation(writer.write, runner, idle_s, ended, barge_in_level)
-                elif not current.active:
-                    _log.info("echo: wake word, the standby session takes the call")
-                    current.activate()
+                else:
+                    if not current.active:
+                        _log.info("echo: wake word, the standby session takes the call")
+                    current.woken()
             elif event.type == "detection":
                 if current is not None and current.active:
                     _log.info("echo: wake word during the call, the reply stops")
+                    current.woken()
                     current.audio.cut_reply()
             elif event.type == "ping":
                 writer.write(encode_event("pong"))

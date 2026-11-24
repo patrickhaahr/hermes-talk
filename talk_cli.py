@@ -211,7 +211,8 @@ def _announcement_commands(
         talk_realtime.AddContext(
             item_id=item_id,
             text=f"{headline} Tell the operator what came of it in a sentence or two of plain "
-            f"speech, numbers rounded to everyday units, without the run number.{framing}",
+            f"speech, numbers rounded to everyday units, without the run number, in the "
+            f"language of the request that the work was for.{framing}",
         ),
         talk_realtime.StartResponse(allow_tools=False),
         talk_realtime.RemoveContext(item_id=item_id),
@@ -398,7 +399,8 @@ class ToolResponseCoordinator:
 
         ``None`` leaves the default continuation (the model replies freely);
         ``False`` means nothing is said; otherwise a tools-off response told to
-        say exactly the joined fixed lines. One result without a fixed reply
+        say exactly the joined fixed lines, and shown nothing else: seeing the
+        request, the model answered it instead. One result without a fixed reply
         (a failure, a lookup) and the model replies freely to all of them.
         """
 
@@ -419,6 +421,7 @@ class ToolResponseCoordinator:
         return replace(
             self._continuation,
             allow_tools=False,
+            input=(),
             instructions=f"Say exactly '{said}' and nothing else.",
         )
 

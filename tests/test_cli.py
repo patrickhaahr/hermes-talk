@@ -967,6 +967,7 @@ def test_a_tool_batch_gets_its_scripted_reply_or_none(calls, reply):
     else:
         assert len(starts) == 1 and starts[0].allow_tools is False
         assert f"'{reply}'" in starts[0].instructions
+        assert starts[0].input == (), "seeing the request, the model answered it"
 
 
 def test_tool_continuation_keeps_the_trusted_speaker_binding_metadata():

@@ -441,6 +441,32 @@ def plugin_version() -> str:
         return "unknown"
 
 
+#: The Echo's handoff: a written-out brief took the model seconds and invented
+#: demands, so the operator's own words go to the orchestrator, which decides.
+_TOOL_DELEGATE_WORDS: dict = {
+    "type": "function",
+    "name": "delegate_task",
+    "description": (
+        "Hand the operator's request to Hermes, which does it and speaks the result "
+        "later. The speaker acknowledges it and hangs up by itself."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": (
+                    "One sentence: what the operator said, in their language, in their "
+                    "words. Never add instructions, scope, format or explanations."
+                ),
+            },
+        },
+        "required": ["task"],
+        "additionalProperties": False,
+    },
+}
+
+
 def default_talk_tools(*, pausable: bool = False, hangable: bool = False) -> list[dict]:
     """The tool set advertised to a new Talk session (fresh copies per call).
 
@@ -476,6 +502,7 @@ def default_talk_tools(*, pausable: bool = False, hangable: bool = False) -> lis
         # The room speaker answers "what can you do" in one line from its lane rule;
         # with the catalog tool, a misheard fragment became a minute-long recital.
         tools.remove(_TOOL_TALK_CAPABILITIES)
+        tools[tools.index(_TOOL_DELEGATE_TASK)] = _TOOL_DELEGATE_WORDS
         tools.append(talk_echo.END_CALL_TOOL)
     if talk_home.available():
         tools.insert(1, talk_home.TOOL)
@@ -501,6 +528,8 @@ def execute_talk_tool(name: str, arguments: dict | None) -> str:
         return f"{name} failed: {type(exc).__name__}: {exc}"
     if name == "home_control" and not talk_home.worked(output):
         _log.warning("home_control: %s", output)
+    if name == "delegate_task" and scripted_reply(name, output) == HANDOFF_REPLY:
+        talk_echo.hang_up_after_reply()
     return (output or "(no output)")[:MAX_OUTPUT_CHARS]
 
 
