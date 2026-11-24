@@ -72,7 +72,8 @@ MAX_PLAYBACK_BYTES = talk_audio.MAX_PLAYBACK_BYTES
 #: Microphone level (normalized RMS) that counts as someone talking, for the
 #: quiet timer only. hassmic brings speech to about -26 dBFS (0.05).
 SPEECH_LEVEL = 0.02
-GATE_FRAME_BYTES = int(RATE * 0.064) * FRAME_BYTES
+GATE_FRAME_S = 0.064
+GATE_FRAME_BYTES = int(RATE * GATE_FRAME_S) * FRAME_BYTES
 GATE_ONSET_FRAMES = 3
 GATE_HANG_FRAMES = 4
 GATE_LEVEL_MIN = 0.0126
@@ -257,6 +258,7 @@ class TalkerGate:
         self._held: deque[bytes] = deque()
         self._open_frames = 0
         self._was_loud = False
+        self._passed: list[float] = []
         self._recent: deque[float] = deque(maxlen=GATE_ROOM_FRAMES)
 
     def _opening_level(self) -> float:
@@ -280,6 +282,7 @@ class TalkerGate:
         loud = level >= self._opening_level()
         if loud and (self._was_loud or self._open_frames):
             self._open_frames = GATE_ONSET_FRAMES + GATE_HANG_FRAMES + 1
+            self._passed.append(level)
         self._was_loud = loud
         self._recent.append(level)
         due = bytes(GATE_FRAME_BYTES)
@@ -288,6 +291,11 @@ class TalkerGate:
             if self._open_frames:
                 due = held
         self._open_frames = max(0, self._open_frames - 1)
+        if self._passed and not self._open_frames:
+            _log.info("echo: heard a sound, %.1f s of it loud, peak %.3f over a room of %.3f",
+                      len(self._passed) * GATE_FRAME_S, max(self._passed),
+                      statistics.median(self._recent))
+            self._passed.clear()
         return due
 
 
@@ -728,9 +736,6 @@ END_CALL_TOOL: dict = {
 }
 
 
-#: A room speaker hears the tail of its own wake word, noise, the TV, and words
-#: meant for someone else; any reply to those talks over the operator's real
-#: request. Calling this is how the model stays silent: the call goes on.
 def note_action(what: str) -> None:
     """Log a tool call or delegation with its latency, for comparing voice models."""
 
