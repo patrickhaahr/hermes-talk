@@ -63,3 +63,21 @@ def test_advertised_only_where_the_cli_exists(monkeypatch):
     assert "home_control" not in names()
     monkeypatch.setattr(talk_home, "available", lambda: True)
     assert names()[1] == "home_control"
+
+
+def test_a_power_press_heard_twice_toggles_once():
+    runner, now = Runner(), [100.0]
+
+    def press():
+        arguments = {"device": "tv", "command": "power", "repeat": 2}
+        return talk_home.run(arguments, runner=runner, clock=lambda: now[0])
+
+    talk_home._power_pressed.clear()
+    assert talk_home.worked(press())
+    now[0] += 3
+    assert talk_home.worked(press())
+    assert len(runner.calls) == 1
+    now[0] += talk_home.POWER_REPEAT_S
+    press()
+    assert len(runner.calls) == 2
+    talk_home._power_pressed.clear()

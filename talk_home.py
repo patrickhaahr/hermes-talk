@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 
 BINARY = "openhome"
 TIMEOUT_S = 8.0
 MAX_REPEAT = 10
+POWER_REPEAT_S = 6.0
 
 #: Spoken device name → the CLI words before the command.
 DEVICES = {"lights": ("lights",), "tv": ("ir", "lgtv"), "speaker": ("ir", "edifier")}
@@ -34,6 +36,7 @@ COMMANDS = (
 )
 
 DONE_PREFIX = "done: "
+_power_pressed: dict[str, float] = {}
 
 TOOL: dict = {
     "type": "function",
@@ -86,14 +89,17 @@ def argv(device: str, command: str) -> list[str] | None:
     return [BINARY, *prefix, command]
 
 
-def run(arguments: dict, *, runner=subprocess.run) -> str:
+def run(arguments: dict, *, runner=subprocess.run, clock=time.monotonic) -> str:
     device = str(arguments.get("device") or "").strip().lower()
     command = str(arguments.get("command") or "")
     call = argv(device, command)
     if call is None:
         return f"home_control: unknown device or command ({device!r} {command!r})."
+    power = call[-1] == "power"
+    if power and clock() - _power_pressed.get(device, float("-inf")) < POWER_REPEAT_S:
+        return f"{DONE_PREFIX}{device} power, already pressed"
     try:
-        repeat = max(1, min(int(arguments.get("repeat") or 1), MAX_REPEAT))
+        repeat = 1 if power else max(1, min(int(arguments.get("repeat") or 1), MAX_REPEAT))
     except (TypeError, ValueError):
         repeat = 1
     for _ in range(repeat):
@@ -106,4 +112,6 @@ def run(arguments: dict, *, runner=subprocess.run) -> str:
             return (
                 f"{device} {call[-1]} failed: {reason[-1] if reason else f'exit {done.returncode}'}"
             )
+    if power:
+        _power_pressed[device] = clock()
     return f"{DONE_PREFIX}{device} {call[-1]}" + (f" x{repeat}" if repeat > 1 else "")

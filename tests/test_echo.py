@@ -289,7 +289,7 @@ def test_while_the_echo_speaks_only_a_voice_louder_than_its_echo_gets_through():
     clock = Clock()
     audio = EchoAudio(lambda _: None, clock=clock, barge_in_level=0.02)
     leftover = _pcm([300, -300] * 501)  # about -40 dBFS
-    voice = _pcm([4000, -4000] * 501)  # about -18 dBFS
+    voice = _pcm([4000, -4000] * 2000)  # about -18 dBFS
     audio.queue_playback(_ms(1000), "reply")
     audio.pace_once()
 
@@ -710,3 +710,13 @@ def test_the_end_of_the_wake_word_is_dropped_and_the_command_after_it_is_not():
     assert tail not in one_breath and command in one_breath
     waited = heard((0, 12), (room, 4), (command, 6), (room, 12))
     assert command in waited
+
+
+def test_a_loud_room_stays_shut_out_and_a_command_over_it_gets_in():
+    room, command = 0.026, 0.07
+    heard = _frames_heard(
+        [0.0] * 12 + [room] * 30 + [command] * 6 + [room] * 30, HASSMIC_PIECE
+    )
+    assert set(range(42, 48)) <= set(heard)
+    assert not set(range(36, 39)) & set(heard)
+    assert max(heard) < 55

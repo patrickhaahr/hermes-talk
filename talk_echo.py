@@ -77,7 +77,9 @@ GATE_FRAME_BYTES = int(RATE * GATE_FRAME_S) * FRAME_BYTES
 GATE_ONSET_FRAMES = 3
 GATE_HANG_FRAMES = 4
 GATE_LEVEL_MIN = 0.0126
-GATE_LEVEL_MAX = SPEECH_LEVEL
+GATE_LEVEL_MAX = 0.04
+GATE_LEVEL_MAX_UNSURE = SPEECH_LEVEL
+GATE_SURE_FRAMES = 16
 GATE_OVER_ROOM = 1.5
 GATE_ROOM_FRAMES = 47
 TALKER_LIFT = 3
@@ -278,7 +280,7 @@ class TalkerGate:
         if not self._wake_word_frames or not any(frame):
             return frame
         self._wake_word_frames -= 1
-        loud = talk_audio._pcm16_rms(frame) >= GATE_LEVEL_MAX
+        loud = talk_audio._pcm16_rms(frame) >= SPEECH_LEVEL
         begun = self._wake_word_frames < GATE_WAKE_WORD_FRAMES - 1
         if not loud and begun:
             self._wake_word_frames = 0
@@ -286,7 +288,9 @@ class TalkerGate:
 
     def _opening_level(self) -> float:
         room = statistics.median(self._recent) if self._recent else 0.0
-        return min(GATE_LEVEL_MAX, max(GATE_LEVEL_MIN, GATE_OVER_ROOM * room))
+        sure = len(self._recent) >= GATE_SURE_FRAMES
+        highest = GATE_LEVEL_MAX if sure else GATE_LEVEL_MAX_UNSURE
+        return min(highest, max(GATE_LEVEL_MIN, GATE_OVER_ROOM * room))
 
     def feed(self, pcm: bytes) -> bytes:
         """Take microphone audio in pieces of any size and return what the session hears now."""
@@ -307,7 +311,8 @@ class TalkerGate:
             self._open_frames = GATE_ONSET_FRAMES + GATE_HANG_FRAMES + 1
             self._passed.append(level)
         self._was_loud = loud
-        self._recent.append(level)
+        if level:
+            self._recent.append(level)
         due = bytes(GATE_FRAME_BYTES)
         if len(self._held) > GATE_ONSET_FRAMES:
             held = self._held.popleft()
@@ -317,7 +322,7 @@ class TalkerGate:
         if self._passed and not self._open_frames:
             _log.info("echo: heard a sound, %.1f s of it loud, peak %.3f over a room of %.3f",
                       len(self._passed) * GATE_FRAME_S, max(self._passed),
-                      statistics.median(self._recent))
+                      statistics.median(self._recent or [0.0]))
             self._passed.clear()
         return due
 
