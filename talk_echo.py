@@ -27,6 +27,7 @@ import json
 import logging
 import math
 import os
+import socket
 import threading
 import time
 import uuid
@@ -88,6 +89,9 @@ ECHO_SPAN_S = 0.8
 ECHO_TAIL_S = 0.6
 
 CONNECT_TIMEOUT_S = 10.0
+LINK_PROBE_IDLE_S = 15
+LINK_PROBE_EVERY_S = 5
+LINK_DEAD_AFTER_S = 30
 RECONNECT_MIN_S = 1.0
 RECONNECT_MAX_S = 30.0
 MAX_HEADER_BYTES = 64 * 1024
@@ -875,8 +879,6 @@ async def _serve_says(queue: asyncio.Queue) -> asyncio.AbstractServer | None:
 def send_say(text: str) -> str:
     """``hermes talk echo-say TEXT``: hand a message to the running Echo surface."""
 
-    import socket
-
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(5.0)
         sock.connect(str(say_socket_path()))
@@ -917,6 +919,13 @@ async def serve(
             says.close()
 
 
+def _detect_silent_power_loss(sock: socket.socket) -> None:
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, LINK_PROBE_IDLE_S)
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, LINK_PROBE_EVERY_S)
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT, LINK_DEAD_AFTER_S * 1000)
+
+
 async def _stay_linked(host, port, runner, idle_s, barge_in_level, say_queue) -> None:
     delay = RECONNECT_MIN_S
     while True:
@@ -931,6 +940,7 @@ async def _stay_linked(host, port, runner, idle_s, barge_in_level, say_queue) ->
         else:
             delay = RECONNECT_MIN_S
             try:
+                _detect_silent_power_loss(writer.get_extra_info("socket"))
                 await _linked(reader, writer, runner, idle_s, barge_in_level, say_queue)
                 _log.warning("echo: %s:%d closed the connection", host, port)
             except (OSError, WyomingError) as exc:
