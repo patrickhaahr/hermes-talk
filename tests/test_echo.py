@@ -682,3 +682,31 @@ def test_a_soft_command_is_heard_in_a_quiet_room_and_the_same_level_of_music_is_
     assert _frames_heard([quiet] * 10 + [soft] * 3 + [quiet] * 12, HASSMIC_PIECE) == list(range(8, 17))
     music = 0.011
     assert _frames_heard([music] * 10 + [soft] * 3 + [music] * 12, HASSMIC_PIECE) == []
+
+
+def test_a_command_softer_than_the_wake_word_reaches_the_session_louder():
+    gate = talk_echo.TalkerGate()
+    size = talk_echo.GATE_FRAME_BYTES // 2
+    heard = gate.feed(_pcm([300] * size * 10 + [700] * size * 4 + [300] * size * 12))
+    assert max(_samples(heard)) == 700 * talk_echo.TALKER_LIFT
+    loud = talk_echo.TalkerGate().feed(_pcm([20000] * size * 8))
+    assert max(_samples(loud)) == 32767
+
+
+def test_the_end_of_the_wake_word_is_dropped_and_the_command_after_it_is_not():
+    size = talk_echo.GATE_FRAME_BYTES // 2
+    tail, command, room = 2000, 1500, 200
+
+    def heard(*stretches):
+        gate = talk_echo.TalkerGate()
+        gate.skip_wake_word()
+        levels = [level for level, frames in stretches for _ in range(frames)]
+        out = _samples(gate.feed(_pcm([s for level in levels for s in [level] * size])))
+        return {s // talk_echo.TALKER_LIFT for s in out}
+
+    paused = heard((0, 12), (tail, 5), (room, 5), (command, 6), (room, 12))
+    assert tail not in paused and command in paused
+    one_breath = heard((0, 12), (tail, 7), (command, 8), (room, 12))
+    assert tail not in one_breath and command in one_breath
+    waited = heard((0, 12), (room, 4), (command, 6), (room, 12))
+    assert command in waited

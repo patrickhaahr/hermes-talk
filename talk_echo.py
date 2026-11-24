@@ -76,10 +76,12 @@ GATE_FRAME_S = 0.064
 GATE_FRAME_BYTES = int(RATE * GATE_FRAME_S) * FRAME_BYTES
 GATE_ONSET_FRAMES = 3
 GATE_HANG_FRAMES = 4
-GATE_LEVEL_MIN = 0.0126
+GATE_LEVEL_MIN = 0.008
 GATE_LEVEL_MAX = SPEECH_LEVEL
-GATE_OVER_ROOM = 2.0
+GATE_OVER_ROOM = 1.5
 GATE_ROOM_FRAMES = 47
+TALKER_LIFT = 3
+GATE_WAKE_WORD_FRAMES = 9
 #: While the Echo speaks, quieter microphone audio goes to the session as
 #: silence: what Amazon's echo canceller leaves of the reply would otherwise
 #: be heard as the operator, and answered. Someone talking over the reply is
@@ -243,13 +245,20 @@ def _bye_tone() -> bytes:
 BYE_TONE = _bye_tone()
 
 
+def _lifted(frame: bytes) -> bytes:
+    samples = array.array("h", frame)
+    return array.array("h", (max(-32768, min(32767, x * TALKER_LIFT)) for x in samples)).tobytes()
+
+
 class TalkerGate:
     """Passes the talker and turns the room behind them (music, a TV) into silence.
 
     Left in, the room keeps the provider's turn from ending or is answered as a
     request. The stream runs GATE_ONSET_FRAMES late so a word keeps its onset.
     The level that opens it follows the room: low in a quiet one, so a command
-    said more softly than the wake word is still heard. A single loud frame is a
+    said more softly than the wake word is still heard, and lifted: the Echo sets
+    its gain by the wake word. A call's audio opens with the end of the wake word,
+    which skip_wake_word keeps from being answered. A single loud frame is a
     knock, not a word.
     """
 
@@ -259,7 +268,21 @@ class TalkerGate:
         self._open_frames = 0
         self._was_loud = False
         self._passed: list[float] = []
+        self._wake_word_frames = 0
         self._recent: deque[float] = deque(maxlen=GATE_ROOM_FRAMES)
+
+    def skip_wake_word(self) -> None:
+        self._wake_word_frames = GATE_WAKE_WORD_FRAMES
+
+    def _without_wake_word(self, frame: bytes) -> bytes:
+        if not self._wake_word_frames or not any(frame):
+            return frame
+        self._wake_word_frames -= 1
+        loud = talk_audio._pcm16_rms(frame) >= GATE_LEVEL_MAX
+        begun = self._wake_word_frames < GATE_WAKE_WORD_FRAMES - 1
+        if not loud and begun:
+            self._wake_word_frames = 0
+        return bytes(len(frame))
 
     def _opening_level(self) -> float:
         room = statistics.median(self._recent) if self._recent else 0.0
@@ -273,7 +296,7 @@ class TalkerGate:
         while len(self._partial) >= GATE_FRAME_BYTES:
             frame = bytes(self._partial[:GATE_FRAME_BYTES])
             del self._partial[:GATE_FRAME_BYTES]
-            heard += self._frame(frame)
+            heard += self._frame(self._without_wake_word(frame))
         return heard
 
     def _frame(self, frame: bytes) -> bytes:
@@ -289,7 +312,7 @@ class TalkerGate:
         if len(self._held) > GATE_ONSET_FRAMES:
             held = self._held.popleft()
             if self._open_frames:
-                due = held
+                due = _lifted(held)
         self._open_frames = max(0, self._open_frames - 1)
         if self._passed and not self._open_frames:
             _log.info("echo: heard a sound, %.1f s of it loud, peak %.3f over a room of %.3f",
@@ -444,6 +467,11 @@ class EchoAudio:
 
     def mark_activity(self) -> None:
         self._last_activity = self._clock()
+
+    def call_started(self) -> None:
+        with self._lock:
+            self._gate.skip_wake_word()
+        self.mark_activity()
 
     def request_hang_up(self) -> None:
         if self._hang_up_at is None:
@@ -665,7 +693,7 @@ class _Conversation:
         if self.active:
             return
         self.active = True
-        self.audio.mark_activity()
+        self.audio.call_started()
         _calling = self.audio
         # A standby's prompt clock is from when it connected, up to
         # STANDBY_REFRESH_S ago: the call brings it up to date.

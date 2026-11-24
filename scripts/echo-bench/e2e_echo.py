@@ -88,6 +88,10 @@ class Echo:
     def wake(self):
         log("wake word")
         self.writer.write(encode_event("run-pipeline", {"start_stage": "asr", "end_stage": "tts"}))
+        # as hassmic does: 0.8 s of silence, the end of the wake word, then the room
+        tail = array.array("h", to16k((CLIPS / "hello.pcm").read_bytes()))
+        loud = next(i for i, x in enumerate(tail) if abs(x) > 1500)
+        self.pending += bytes(25600) + tail[loud:loud + 5600].tobytes() + array.array("h", [40, -40] * 1600).tobytes()
 
     async def say(self, clip):
         pcm = to16k((CLIPS / f"{clip}.pcm").read_bytes())
