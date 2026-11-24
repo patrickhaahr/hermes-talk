@@ -35,6 +35,18 @@ def _samples(pcm: bytes) -> list[int]:
     return list(out)
 
 
+def _heard(audio: EchoAudio, pcm: bytes) -> bool:
+    """Whether the session hears any of this chunk, once it is through the gate's delay."""
+
+    audio.feed_microphone(pcm)
+    for _ in range(talk_echo.GATE_ONSET_CHUNKS + talk_echo.GATE_HANG_CHUNKS + 1):
+        audio.feed_microphone(bytes(len(pcm)))
+    heard = b""
+    while (chunk := audio.read_input_chunk()) is not None:
+        heard += chunk
+    return any(heard)
+
+
 # -- framing -------------------------------------------------------------------
 
 
@@ -281,16 +293,13 @@ def test_while_the_echo_speaks_only_a_voice_louder_than_its_echo_gets_through():
     audio.queue_playback(_ms(1000), "reply")
     audio.pace_once()
 
-    audio.feed_microphone(leftover)
-    assert set(audio.read_input_chunk()) == {0}
-    audio.feed_microphone(voice)
-    assert set(audio.read_input_chunk()) != {0}
+    assert not _heard(audio, leftover)
+    assert _heard(audio, voice)
 
     clock.now += talk_echo.PLAYBACK_LEAD_S + talk_echo.ECHO_TAIL_S + 0.01
     audio.drain_playback()
-    audio.feed_microphone(leftover)
-    assert set(audio.read_input_chunk()) != {0}
-    assert "1 gated under 0.02 or" in audio.level_report()
+    assert _heard(audio, voice)
+    assert " gated under 0.02 or" in audio.level_report()
 
 
 def test_echo_as_loud_as_the_operator_is_held_back_by_the_reply_level():
@@ -304,15 +313,12 @@ def test_echo_as_loud_as_the_operator_is_held_back_by_the_reply_level():
     audio.queue_playback(reply, "reply")
     audio.pace_once()
 
-    audio.feed_microphone(leak)
-    assert set(audio.read_input_chunk()) == {0}
-    audio.feed_microphone(shout)
-    assert set(audio.read_input_chunk()) != {0}
+    assert not _heard(audio, leak)
+    assert _heard(audio, shout)
 
     audio.drain_playback()
     clock.now += talk_echo.PLAYBACK_LEAD_S + 0.45  # the room still carries the reply back
-    audio.feed_microphone(leak)
-    assert set(audio.read_input_chunk()) == {0}
+    assert not _heard(audio, leak)
 
 
 def test_wake_word_during_the_reply_stops_it_and_opens_the_microphone():
@@ -325,8 +331,7 @@ def test_wake_word_during_the_reply_stops_it_and_opens_the_microphone():
     assert not audio.playback_pending
     audio.queue_playback(_ms(500), "reply")  # the rest of it, still streaming in
     assert not audio.playback_pending
-    audio.feed_microphone(_pcm([4000, -4000] * 501))  # "stop", over what the Echo still plays
-    assert set(audio.read_input_chunk()) != {0}
+    assert _heard(audio, _pcm([4000, -4000] * 501))  # "stop", over what the Echo still plays
 
     assert audio.drain_playback()[0] == "reply", "the session still learns what was heard"
     audio.queue_playback(_ms(500), "next")
@@ -645,3 +650,22 @@ def test_a_standby_taking_the_call_learns_the_time_it_started():
     batch = asyncio.run(go())
     assert [type(command) for command in batch] == [talk_realtime.AddContext]
     assert talk_identity.current_moment() in batch[0].text
+
+
+def _chunks_heard(levels):
+    gate = talk_echo.TalkerGate()
+    out = [gate.feed(bytes([i + 1]) * 2, level) for i, level in enumerate(levels)]
+    assert all(len(chunk) == 2 for chunk in out)
+    return [chunk[0] - 1 for chunk in out if any(chunk)]
+
+
+def test_the_room_behind_the_talker_is_silenced_and_words_keep_their_edges():
+    music, word = 0.011, 0.05
+    assert _chunks_heard([music] * 10 + [word] * 3 + [music] * 12) == list(range(8, 17))
+
+
+def test_a_soft_command_is_heard_in_a_quiet_room_and_the_same_level_of_music_is_not():
+    quiet, soft = 0.003, 0.015
+    assert _chunks_heard([quiet] * 10 + [soft] * 3 + [quiet] * 12) == list(range(8, 17))
+    music = 0.011
+    assert _chunks_heard([music] * 10 + [soft] * 3 + [music] * 12) == []

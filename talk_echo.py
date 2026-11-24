@@ -28,6 +28,7 @@ import logging
 import math
 import os
 import socket
+import statistics
 import threading
 import time
 import uuid
@@ -71,6 +72,12 @@ MAX_PLAYBACK_BYTES = talk_audio.MAX_PLAYBACK_BYTES
 #: Microphone level (normalized RMS) that counts as someone talking, for the
 #: quiet timer only. hassmic brings speech to about -26 dBFS (0.05).
 SPEECH_LEVEL = 0.02
+GATE_ONSET_CHUNKS = 2
+GATE_HANG_CHUNKS = 4
+GATE_LEVEL_MIN = 0.0126
+GATE_LEVEL_MAX = SPEECH_LEVEL
+GATE_OVER_ROOM = 2.0
+GATE_ROOM_CHUNKS = 47
 #: While the Echo speaks, quieter microphone audio goes to the session as
 #: silence: what Amazon's echo canceller leaves of the reply would otherwise
 #: be heard as the operator, and answered. Someone talking over the reply is
@@ -234,6 +241,39 @@ def _bye_tone() -> bytes:
 BYE_TONE = _bye_tone()
 
 
+class TalkerGate:
+    """Passes the talker and turns the room behind them (music, a TV) into silence.
+
+    Left in, the room keeps the provider's turn from ending or is answered as a
+    request. The stream runs GATE_ONSET_CHUNKS late so a word keeps its onset.
+    The level that opens it follows the room: low in a quiet one, so a command
+    said more softly than the wake word is still heard.
+    """
+
+    def __init__(self) -> None:
+        self._held: deque[bytes] = deque()
+        self._open_chunks = 0
+        self._recent: deque[float] = deque(maxlen=GATE_ROOM_CHUNKS)
+
+    def _opening_level(self) -> float:
+        room = statistics.median(self._recent) if self._recent else 0.0
+        return min(GATE_LEVEL_MAX, max(GATE_LEVEL_MIN, GATE_OVER_ROOM * room))
+
+    def feed(self, pcm: bytes, level: float) -> bytes:
+        """Take one chunk and return what the session hears now."""
+
+        self._held.append(pcm)
+        if level >= self._opening_level():
+            self._open_chunks = GATE_ONSET_CHUNKS + GATE_HANG_CHUNKS + 1
+        heard = bytes(len(pcm))
+        if len(self._held) > GATE_ONSET_CHUNKS:
+            due = self._held.popleft()
+            heard = due if self._open_chunks else bytes(len(due))
+        self._recent.append(level)
+        self._open_chunks = max(0, self._open_chunks - 1)
+        return heard
+
+
 class EchoAudio:
     """DuplexAudio's session interface, over one Echo's Wyoming connection.
 
@@ -256,6 +296,7 @@ class EchoAudio:
         self._on_speech = on_speech
         self._hang_up_at: float | None = None
         self._barge_in_level = barge_in_level
+        self._gate = TalkerGate()
         self._levels: dict[bool, list[float]] = {True: [], False: []}
         self._gated = 0
         self._echo: deque[tuple[float, float]] = deque()  # (sent until, level) per playback chunk
@@ -322,6 +363,7 @@ class EchoAudio:
                 self._last_activity = self._last_spoke = self._clock()
             if self._input_paused:
                 return
+            pcm = self._gate.feed(pcm, talk_audio._pcm16_rms(pcm))
             self._input.append(pcm)
             self._input_bytes += len(pcm)
             # Newest audio wins, as on the terminal: stale speech corrupts the turn.
@@ -464,6 +506,7 @@ class EchoAudio:
     def pause_input(self) -> None:
         with self._lock:
             self._input_paused = True
+            self._gate = TalkerGate()
             self._input.clear()
             self._input_bytes = 0
 
