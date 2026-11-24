@@ -82,9 +82,16 @@ MAX_PLAYBACK_BYTES = talk_audio.MAX_PLAYBACK_BYTES
 SPEECH_LEVEL = 0.02
 GATE_FRAME_S = 0.064
 GATE_FRAME_BYTES = int(RATE * GATE_FRAME_S) * FRAME_BYTES
-GATE_ONSET_FRAMES = 4
-#: A click on the desk is loud for a frame or two and drew a "Sorry?" each time.
+GATE_ONSET_FRAMES = 6
+#: A click on the desk, loud for a frame or two, drew a "Sorry?" each time.
 GATE_WORD_FRAMES = 3
+GATE_LOUD_FRAMES = 2
+#: The rest of a word is softer than its vowel: "sluk lyset" at a casual volume
+#: has two loud frames, a silent k and a "lyset" under the opening level. So a
+#: word is that many frames over this share of it, and over the room, which
+#: also holds the gate open. A click's ring is far under its own peak.
+GATE_SOFT_SHARE = 0.4
+GATE_RING_SHARE = 0.15
 GATE_HANG_FRAMES = 4
 GATE_LEVEL_MIN = 0.0126
 GATE_LEVEL_MAX = 0.04
@@ -292,15 +299,15 @@ class TalkerGate:
     The level that opens it follows the room: low in a quiet one, so a command
     said more softly than the wake word is still heard, and lifted: the Echo sets
     its gain by the wake word. A call's audio opens with the end of the wake word,
-    which skip_wake_word keeps from being answered. Fewer loud frames than
-    GATE_WORD_FRAMES are a knock, not a word.
+    which skip_wake_word keeps from being answered. A short burst with
+    nothing around it is a knock, not a word.
     """
 
     def __init__(self) -> None:
         self._partial = bytearray()
         self._held: deque[bytes] = deque()
         self._open_frames = 0
-        self._loud: deque[bool] = deque(maxlen=GATE_ONSET_FRAMES)
+        self._levels: deque[float] = deque(maxlen=GATE_ONSET_FRAMES)
         self._passed: list[float] = []
         self._wake_word_frames = 0
         self._recent: deque[float] = deque(maxlen=GATE_ROOM_FRAMES)
@@ -318,8 +325,11 @@ class TalkerGate:
             self._wake_word_frames = 0
         return bytes(len(frame))
 
+    def _room(self) -> float:
+        return statistics.median(self._recent) if self._recent else 0.0
+
     def _opening_level(self) -> float:
-        room = statistics.median(self._recent) if self._recent else 0.0
+        room = self._room()
         sure = len(self._recent) >= GATE_SURE_FRAMES
         highest = GATE_LEVEL_MAX if sure else GATE_LEVEL_MAX_UNSURE
         return min(highest, max(GATE_LEVEL_MIN, GATE_OVER_ROOM * room))
@@ -338,9 +348,11 @@ class TalkerGate:
     def _frame(self, frame: bytes) -> bytes:
         level = talk_audio._pcm16_rms(frame)
         self._held.append(frame)
-        loud = level >= self._opening_level()
-        self._loud.append(loud)
-        if loud and (sum(self._loud) >= GATE_WORD_FRAMES or self._open_frames):
+        opening = self._opening_level()
+        soft = min(opening, max(GATE_SOFT_SHARE * opening, GATE_OVER_ROOM * self._room()))
+        self._levels.append(level)
+        word = level >= soft and self._is_word(opening, soft)
+        if word or (self._open_frames and level >= soft):
             self._open_frames = GATE_ONSET_FRAMES + GATE_HANG_FRAMES + 1
             self._passed.append(level)
         if level:
@@ -357,6 +369,14 @@ class TalkerGate:
                       statistics.median(self._recent or [0.0]))
             self._passed.clear()
         return due
+
+
+    def _is_word(self, opening: float, soft: float) -> bool:
+        audible = max(soft, GATE_RING_SHARE * max(self._levels))
+        return (
+            sum(level >= opening for level in self._levels) >= GATE_LOUD_FRAMES
+            and sum(level >= audible for level in self._levels) >= GATE_WORD_FRAMES
+        )
 
 
 class EchoAudio:

@@ -787,7 +787,7 @@ HASSMIC_PIECE = 768  # 16 ms, what the Echo 2 sends
 @pytest.mark.parametrize("piece", [HASSMIC_PIECE, 1000, 3072])
 def test_the_room_behind_the_talker_is_silenced_and_words_keep_their_edges(piece):
     music, word = 0.011, 0.05
-    assert _frames_heard([music] * 10 + [word] * 3 + [music] * 12, piece) == list(range(8, 17))
+    assert _frames_heard([music] * 10 + [word] * 3 + [music] * 12, piece) == list(range(6, 17))
 
 
 @pytest.mark.parametrize("knock", [[0.3], [0.3, 0.3], [0.3, 0.003, 0.3]])
@@ -797,9 +797,21 @@ def test_a_knock_does_not_open_the_gate(knock):
 
 def test_a_soft_command_is_heard_in_a_quiet_room_and_the_same_level_of_music_is_not():
     quiet, soft = 0.003, 0.015
-    assert _frames_heard([quiet] * 10 + [soft] * 3 + [quiet] * 12, HASSMIC_PIECE) == list(range(8, 17))
+    assert _frames_heard([quiet] * 10 + [soft] * 3 + [quiet] * 12, HASSMIC_PIECE) == list(range(6, 17))
     music = 0.011
     assert _frames_heard([music] * 10 + [soft] * 3 + [music] * 12, HASSMIC_PIECE) == []
+
+
+@pytest.mark.parametrize("word", [
+    [0.0017, 0.0059, 0.0061, 0.022, 0.0141, 0.0023, 0.0075, 0.0132, 0.0054, 0.0067, 0.0061],
+    [0.0022, 0.0062, 0.0126, 0.022, 0.0100, 0.0040, 0.0040, 0.0101, 0.0114, 0.0043, 0.0062],
+    [0.0043, 0.0129, 0.022, 0.0061, 0.0045, 0.0094, 0.0157, 0.0058, 0.0091, 0.0072, 0.0098],
+])
+def test_soft_danish_light_commands_are_heard_whole_around_their_silent_k(word):
+    """Frame levels of "sluk lyset" and "tænd lyset" by two Danish voices at a casual volume."""
+
+    heard = _frames_heard([0.004] * 20 + word + [0.004] * 12, HASSMIC_PIECE)
+    assert set(range(22, 20 + len(word))) <= set(heard)
 
 
 def test_a_command_softer_than_the_wake_word_reaches_the_session_louder():
@@ -836,5 +848,5 @@ def test_a_loud_room_stays_shut_out_and_a_command_over_it_gets_in():
         [0.0] * 12 + [room] * 30 + [command] * 6 + [room] * 30, HASSMIC_PIECE
     )
     assert set(range(42, 48)) <= set(heard)
-    assert not set(range(36, 39)) & set(heard)
+    assert not set(range(33, 36)) & set(heard)
     assert max(heard) < 55
