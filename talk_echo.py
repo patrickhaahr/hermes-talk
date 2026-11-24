@@ -53,7 +53,11 @@ LANE = "echo"
 #: call that asked for it has ended.
 RETURN_SESSION_ID = "talk-echo"
 DEFAULT_PORT = 16700
-DEFAULT_IDLE_S = 20.0
+#: Counted from the last thing done or said, never from sound: the room alone
+#: is as loud as a soft command and kept the call open.
+DEFAULT_IDLE_S = 10.0
+#: Someone being heard puts the end off, for as long again at most.
+STILL_HEARD_S = 2.5
 #: After the Echo spoke on its own nobody has woken it: the room's noise after
 #: a result drew a "Sorry?" until the call closed soon after.
 UNWOKEN_IDLE_S = 4.0
@@ -78,7 +82,9 @@ MAX_PLAYBACK_BYTES = talk_audio.MAX_PLAYBACK_BYTES
 SPEECH_LEVEL = 0.02
 GATE_FRAME_S = 0.064
 GATE_FRAME_BYTES = int(RATE * GATE_FRAME_S) * FRAME_BYTES
-GATE_ONSET_FRAMES = 3
+GATE_ONSET_FRAMES = 4
+#: A click on the desk is loud for a frame or two and drew a "Sorry?" each time.
+GATE_WORD_FRAMES = 3
 GATE_HANG_FRAMES = 4
 GATE_LEVEL_MIN = 0.0126
 GATE_LEVEL_MAX = 0.04
@@ -143,8 +149,12 @@ GOODBYE = re.compile(
     r"|\bvi ses\b|\bgood ?night\b|\bgod ?nat\b",
     re.IGNORECASE,
 )
+#: As short as this it hangs up by itself: the model now and then let one pass.
+GOODBYE_WORDS = 4
 GOODBYE_RECENT_S = 6.0
 GOODBYE_WAIT_S = 1.5
+#: Asked for again this soon, a hang-up is the operator insisting.
+GOODBYE_INSISTED_S = 10.0
 #: ``hermes talk echo-say`` reaches the running surface through this socket,
 #: under the Hermes home (only its owner may connect).
 SAY_SOCKET = "talk-echo.sock"
@@ -282,15 +292,15 @@ class TalkerGate:
     The level that opens it follows the room: low in a quiet one, so a command
     said more softly than the wake word is still heard, and lifted: the Echo sets
     its gain by the wake word. A call's audio opens with the end of the wake word,
-    which skip_wake_word keeps from being answered. A single loud frame is a
-    knock, not a word.
+    which skip_wake_word keeps from being answered. Fewer loud frames than
+    GATE_WORD_FRAMES are a knock, not a word.
     """
 
     def __init__(self) -> None:
         self._partial = bytearray()
         self._held: deque[bytes] = deque()
         self._open_frames = 0
-        self._was_loud = False
+        self._loud: deque[bool] = deque(maxlen=GATE_ONSET_FRAMES)
         self._passed: list[float] = []
         self._wake_word_frames = 0
         self._recent: deque[float] = deque(maxlen=GATE_ROOM_FRAMES)
@@ -329,10 +339,10 @@ class TalkerGate:
         level = talk_audio._pcm16_rms(frame)
         self._held.append(frame)
         loud = level >= self._opening_level()
-        if loud and (self._was_loud or self._open_frames):
+        self._loud.append(loud)
+        if loud and (sum(self._loud) >= GATE_WORD_FRAMES or self._open_frames):
             self._open_frames = GATE_ONSET_FRAMES + GATE_HANG_FRAMES + 1
             self._passed.append(level)
-        self._was_loud = loud
         if level:
             self._recent.append(level)
         due = bytes(GATE_FRAME_BYTES)
@@ -372,7 +382,9 @@ class EchoAudio:
         self._hang_up_at: float | None = None
         self._hang_up_after_reply = False
         self._handed_off_at: float | None = None
-        self._passed_at = self._said_goodbye_at = float("-inf")
+        self._passed_at = self._sound_began_at = float("-inf")
+        self._said_goodbye_at = self._said_other_at = self._refused_at = float("-inf")
+        self._may_ask = True
         self._barge_in_level = barge_in_level
         self._gate = TalkerGate()
         self._levels: dict[bool, list[float]] = {True: [], False: []}
@@ -438,13 +450,15 @@ class EchoAudio:
                 pcm = bytes(len(pcm))
                 self._gated += 1
             elif level >= SPEECH_LEVEL:
-                self._last_activity = self._last_spoke = self._clock()
+                self._last_spoke = self._clock()
             if self._input_paused:
                 return
             pcm = self._gate.feed(pcm)
             if not pcm:
                 return
             if pcm.strip(b"\0"):
+                if now - self._passed_at > GATE_FRAME_S * GATE_HANG_FRAMES:
+                    self._sound_began_at = now
                 self._passed_at = now
             self._input.append(pcm)
             self._input_bytes += len(pcm)
@@ -528,9 +542,41 @@ class EchoAudio:
     def operator_said(self, transcript: str) -> None:
         if GOODBYE.search(transcript):
             self._said_goodbye_at = self._clock()
+            if len(transcript.split()) <= GOODBYE_WORDS and "stop" not in transcript.lower():
+                self.request_hang_up()
+        else:
+            self._said_other_at = self._clock()
 
-    def said_goodbye(self) -> bool:
-        return self._clock() - self._said_goodbye_at <= GOODBYE_RECENT_S
+    def said_goodbye(self) -> bool | None:
+        """Whether the operator's last words were a goodbye, or None while that is unknown."""
+
+        if self._clock() - self._said_goodbye_at <= GOODBYE_RECENT_S:
+            return True
+        return False if self._said_other_at > self._sound_began_at else None
+
+    def accepts_hang_up(self) -> bool:
+        """A short goodbye often gets no transcript: then nothing more being said will do."""
+
+        asked_at = self._clock()
+        insisted = asked_at - self._refused_at <= GOODBYE_INSISTED_S
+        deadline = time.monotonic() + GOODBYE_WAIT_S
+        while not insisted and (said := self.said_goodbye()) is not True:
+            if said is False or self._sound_began_at > asked_at or time.monotonic() >= deadline:
+                if said is None and self._sound_began_at <= asked_at:
+                    break
+                self._refused_at = asked_at
+                return False
+            time.sleep(0.05)
+        return True
+
+    def take_question(self) -> bool:
+        """Whether "Sorry?" may be said: once a call, and never to a room nobody woke it in."""
+
+        may, self._may_ask = self._may_ask, False
+        return may
+
+    def allow_question(self, allowed: bool) -> None:
+        self._may_ask = allowed
 
     def hung_up(self) -> bool:
         """A hang-up was asked for, and what is said before it has played (or never came)."""
@@ -556,6 +602,11 @@ class EchoAudio:
         if speaking:
             self._last_activity = self._clock()
         return self._clock() - self._last_activity
+
+    def idle(self, idle_s: float) -> bool:
+        quiet = self.quiet_s()
+        heard = self._clock() - self._passed_at < STILL_HEARD_S
+        return quiet >= (2 * idle_s if heard else idle_s)
 
     # -- pacing ----------------------------------------------------------------
 
@@ -750,10 +801,12 @@ class _Conversation:
     def _speak_unwoken(self) -> None:
         if not self.active:
             self._unwoken = True
+            self.audio.allow_question(False)
             self.activate()
 
     def woken(self) -> None:
         self._unwoken = False
+        self.audio.allow_question(True)
         self.activate()
         self.audio.mark_activity()
 
@@ -782,7 +835,7 @@ class _Conversation:
                     await self.audio.play_out(BYE_TONE)
                     break
                 idle_s = min(self._idle_s, UNWOKEN_IDLE_S) if self._unwoken else self._idle_s
-                if self.audio.quiet_s() >= idle_s:
+                if self.audio.idle(idle_s):
                     _log.info("echo: quiet for %.0f s, ending the session", idle_s)
                     break
             elif loop.time() - born >= STANDBY_REFRESH_S:
@@ -837,31 +890,51 @@ END_CALL_TOOL: dict = {
 }
 
 
+UNCLEAR_TOOL: dict = {
+    "type": "function",
+    "name": "unclear",
+    "description": (
+        "You could make out no request in what was heard. The speaker asks the operator "
+        "again when that helps; say nothing yourself."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {"danish": {"type": "boolean", "description": "It sounded Danish."}},
+        "required": ["danish"],
+        "additionalProperties": False,
+    },
+}
+NOT_ASKED = "Nothing was said."
+ASKED = {True: "Hvad siger du?", False: "Sorry?"}
+
+
+def run_unclear(arguments: dict) -> str:
+    if _calling is None or not _calling.take_question():
+        return NOT_ASKED
+    return ASKED[bool(arguments.get("danish"))]
+
+
 def note_action(what: str) -> None:
     """Log a tool call or delegation with its latency, for comparing voice models."""
 
     if _calling is not None:
         _log.info("echo: action %s, %.2f s after the operator last spoke",
                   what[:120], _calling.since_spoke())
+        if not what.startswith((UNCLEAR_TOOL["name"], END_CALL_TOOL["name"])):
+            _calling.mark_activity()
 
 
 HANGING_UP = "Hanging up after the operator's goodbye."
-NO_GOODBYE = (
-    "The operator said no goodbye, so the call stays open. A short sound like 'CV' is 'TV': "
-    "run what they asked for if you are sure of it, otherwise say only 'Sorry?'."
-)
+NO_GOODBYE = "The operator said no goodbye, so the call stays open."
 
 
 def run_end_call(arguments: dict) -> str:
     audio = _calling
     if audio is None:
         return "There is no call on the Echo to end."
-    deadline = time.monotonic() + GOODBYE_WAIT_S
-    while not audio.said_goodbye():
-        if time.monotonic() >= deadline:
-            _log.info("echo: no goodbye was heard, the call stays open")
-            return NO_GOODBYE
-        time.sleep(0.05)
+    if not audio.accepts_hang_up():
+        _log.info("echo: no goodbye was heard, the call stays open")
+        return NO_GOODBYE
     audio.request_hang_up()
     return HANGING_UP
 
@@ -1174,6 +1247,7 @@ __all__ = [
     "encode_event",
     "read_event",
     "run_end_call",
+    "run_unclear",
     "send_say",
     "serve",
 ]

@@ -185,13 +185,15 @@ def test_a_session_that_never_spoke_ends_quietly():
     assert _sent([audio.end_event(failed=True)])[0].data["code"] == "talk-session-failed"
 
 
-def test_quiet_timer_counts_speech_and_playback_not_silence():
+def test_quiet_timer_counts_actions_and_playback_not_sound():
     clock = Clock()
     audio = EchoAudio(lambda _: None, clock=clock)
     clock.now += 5
     audio.feed_microphone(_pcm([0] * 1600))
     assert audio.quiet_s() == 5
     audio.feed_microphone(_pcm([8000, -8000] * 800))
+    assert audio.quiet_s() == 5
+    audio.mark_activity()
     assert audio.quiet_s() == 0
     clock.now += 3
     audio.queue_playback(_ms(100))
@@ -309,7 +311,7 @@ def test_echo_as_loud_as_the_operator_is_held_back_by_the_reply_level():
     audio = EchoAudio(lambda _: None, clock=clock, barge_in_level=0.02)
     reply = _pcm([3300, -3300] * 2400)  # about -20 dBFS, a normal reply
     leak = _pcm([4000, -4000] * 501)  # the reply coming back, a little louder
-    shout = _pcm([12000, -12000] * 501)
+    shout = _pcm([12000, -12000] * 2000)
     audio.queue_playback(reply, "reply")
     audio.pace_once()
 
@@ -602,7 +604,62 @@ def test_end_call_needs_a_goodbye_the_transcriber_heard_too(monkeypatch, heard, 
     audio.operator_said(heard)
     reply = talk_echo.run_end_call({})
     assert (reply == talk_echo.HANGING_UP) is hangs_up
+    assert talk_echo.run_end_call({}) == talk_echo.HANGING_UP, "asked again, the operator insists"
+
+
+@pytest.mark.parametrize(
+    ("heard", "hangs_up"),
+    [("Bye-bye.", True), ("Okay, that's it.", True), ("Tak, farvel.", True), ("Stop.", False),
+     ("Play.", False), ("How do you say goodbye in Danish?", False)],
+)
+def test_a_plain_goodbye_hangs_up_without_the_model(heard, hangs_up):
+    audio = EchoAudio(lambda _: None)
+    audio.operator_said(heard)
     assert (audio._hang_up_at is not None) is hangs_up
+
+
+def test_a_goodbye_without_a_transcript_hangs_up(monkeypatch):
+    audio = EchoAudio(lambda _: None)
+    monkeypatch.setattr(talk_echo, "_calling", audio)
+    monkeypatch.setattr(talk_echo, "GOODBYE_WAIT_S", 0.1)
+    for _ in range(40):
+        audio.feed_microphone(_pcm([9000, -9000] * 128))
+    assert talk_echo.run_end_call({}) == talk_echo.HANGING_UP
+
+
+def test_the_room_does_not_keep_the_call_open_but_someone_speaking_puts_the_end_off():
+    clock = Clock()
+    audio = EchoAudio(lambda _: None, clock=clock)
+    audio.call_started()
+
+    def hear(level, seconds):
+        for _ in range(int(seconds / 0.016)):
+            audio.feed_microphone(_pcm([level, -level] * 128))
+            clock.now += 0.016
+
+    hear(900, 10.5)
+    assert audio.idle(10), "a room of 0.027 is no activity"
+    audio.mark_activity()
+    hear(900, 9.0)
+    hear(9000, 1.5)
+    assert not audio.idle(10)
+    hear(900, 10)
+    assert audio.idle(10)
+
+
+def test_sorry_is_asked_once_a_call_and_not_in_one_nobody_woke(monkeypatch):
+    import talk_tools
+
+    audio = EchoAudio(lambda _: None)
+    monkeypatch.setattr(talk_echo, "_calling", audio)
+    def say(danish):
+        output = talk_tools.execute_talk_tool("unclear", {"danish": danish})
+        return talk_tools.scripted_reply("unclear", output)
+
+    said = [say(True), say(False)]
+    assert said == ["Hvad siger du?", ""]
+    audio.allow_question(False)
+    assert talk_echo.run_unclear({"danish": False}) == talk_echo.NOT_ASKED
 
 
 def test_end_call_plays_the_goodbye_then_the_bye_tone_then_hands_back(monkeypatch):
@@ -733,8 +790,9 @@ def test_the_room_behind_the_talker_is_silenced_and_words_keep_their_edges(piece
     assert _frames_heard([music] * 10 + [word] * 3 + [music] * 12, piece) == list(range(8, 17))
 
 
-def test_a_single_knock_does_not_open_the_gate():
-    assert _frames_heard([0.003] * 10 + [0.3] + [0.003] * 12, HASSMIC_PIECE) == []
+@pytest.mark.parametrize("knock", [[0.3], [0.3, 0.3], [0.3, 0.003, 0.3]])
+def test_a_knock_does_not_open_the_gate(knock):
+    assert _frames_heard([0.003] * 10 + knock + [0.003] * 12, HASSMIC_PIECE) == []
 
 
 def test_a_soft_command_is_heard_in_a_quiet_room_and_the_same_level_of_music_is_not():

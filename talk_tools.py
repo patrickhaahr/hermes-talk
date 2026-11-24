@@ -503,7 +503,7 @@ def default_talk_tools(*, pausable: bool = False, hangable: bool = False) -> lis
         # with the catalog tool, a misheard fragment became a minute-long recital.
         tools.remove(_TOOL_TALK_CAPABILITIES)
         tools[tools.index(_TOOL_DELEGATE_TASK)] = _TOOL_DELEGATE_WORDS
-        tools.append(talk_echo.END_CALL_TOOL)
+        tools += [talk_echo.END_CALL_TOOL, talk_echo.UNCLEAR_TOOL]
     if talk_home.available():
         tools.insert(1, talk_home.TOOL)
     try:
@@ -932,7 +932,10 @@ def _handoff_reply() -> str:
 _SCRIPTED_REPLIES = {
     "home_control": lambda output: "" if talk_home.worked(output) else None,
     "delegate_task": lambda output: _handoff_reply() if output.startswith("WORK_STARTED") else None,
-    "end_call": lambda output: "" if output == talk_echo.HANGING_UP else None,
+    "end_call": lambda output: (
+        "" if output in (talk_echo.HANGING_UP, talk_echo.NO_GOODBYE) else None
+    ),
+    "unclear": lambda output: "" if output == talk_echo.NOT_ASKED else output,
 }
 
 
@@ -946,6 +949,7 @@ def scripted_reply(name: str, output: str) -> str | None:
 _HANDLERS = {
     "home_control": talk_home.run,
     "end_call": talk_echo.run_end_call,
+    "unclear": talk_echo.run_unclear,
     "search_memory": _handle_search_memory,
     "search_vault": _handle_search_vault,
     "delegate_task": _handle_delegate_task,
