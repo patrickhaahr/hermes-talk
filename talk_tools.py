@@ -447,8 +447,8 @@ _TOOL_DELEGATE_WORDS: dict = {
     "type": "function",
     "name": "delegate_task",
     "description": (
-        "Hand the operator's request to Hermes, which does it and speaks the result "
-        "later. The speaker acknowledges it and hangs up by itself."
+        "Hand one request to Hermes, which runs in the background and speaks the result "
+        "when done. Call once per independent task in the same turn."
     ),
     "parameters": {
         "type": "object",
@@ -503,7 +503,7 @@ def default_talk_tools(*, pausable: bool = False, hangable: bool = False) -> lis
         # with the catalog tool, a misheard fragment became a minute-long recital.
         tools.remove(_TOOL_TALK_CAPABILITIES)
         tools[tools.index(_TOOL_DELEGATE_TASK)] = _TOOL_DELEGATE_WORDS
-        tools += [talk_echo.END_CALL_TOOL, talk_echo.UNCLEAR_TOOL]
+        tools += [talk_echo.END_CALL_TOOL, talk_echo.UNCLEAR_TOOL, talk_echo.GET_TIME_TOOL]
     if talk_home.available():
         tools.insert(1, talk_home.TOOL)
     try:
@@ -954,6 +954,7 @@ _HANDLERS = {
     "home_control": talk_home.run,
     "end_call": talk_echo.run_end_call,
     "unclear": talk_echo.run_unclear,
+    "get_time": talk_echo.run_get_time,
     "search_memory": _handle_search_memory,
     "search_vault": _handle_search_vault,
     "delegate_task": _handle_delegate_task,

@@ -144,7 +144,7 @@ HANG_UP_MAX_S = 10.0
 #: at once made the Echo deaf to it: it is said, and the call closes, once nothing
 #: was heard for this long.
 HANDOFF_REPLY = "On it."
-HANDOFF_QUIET_S = 3.0
+HANDOFF_QUIET_S = 2.0
 #: Talked over, the reply never plays.
 REPLY_COMES_WITHIN_S = 5.0
 #: The model hung up on a misheard "TV", so a goodbye must also be in what the
@@ -152,8 +152,13 @@ REPLY_COMES_WITHIN_S = 5.0
 #: been written "Tovel" and "Forvel farve".
 GOODBYE = re.compile(
     r"\b(?:good)?bye\b|\bbaj\b|\b(?:f[ao]r|to|f[ao])\s?vel\b|\bhej[\s-]+hej\b"
-    r"|\bthat['\u2019]?s (?:all|it)\b|\bdet var det\b|\bstop\b|\bhang up\b|\blæg på\b"
+    r"|\bthat['\u2019]?s (?:all|it)\b|\bdet var (?:det|alt)\b|\bstop\b|\bhold op\b"
+    r"|\bslut\b|\bafslut\b|\bikke mere\b|\bok(?:ay)?[,\s]+tak\b|\bhang up\b|\blæg på\b"
     r"|\bvi ses\b|\bgood ?night\b|\bgod ?nat\b",
+    re.IGNORECASE,
+)
+_STOP_TARGET = re.compile(
+    r"\b(?:work|run|task|job|agent|music|musik|tv|video|lyd|sound)\b",
     re.IGNORECASE,
 )
 #: As short as this it hangs up by itself: the model now and then let one pass.
@@ -537,7 +542,10 @@ class EchoAudio:
         return self._clock() - self._last_spoke
 
     def mark_activity(self) -> None:
-        self._last_activity = self._clock()
+        now = self._clock()
+        self._last_activity = now
+        if self._handed_off_at is not None:
+            self._handed_off_at = max(self._handed_off_at, now)
 
     def call_started(self) -> None:
         with self._lock:
@@ -548,9 +556,13 @@ class EchoAudio:
         if self._hang_up_at is None:
             self._hang_up_at = self._clock()
             self._hang_up_after_reply = after_reply
+            self._handed_off_at = None
 
     def handed_off(self) -> None:
         self._handed_off_at = self._clock()
+
+    def clear_handoff(self) -> None:
+        self._handed_off_at = None
 
     def take_settled_handoff(self) -> bool:
         """Once per handoff: the operator has gone quiet after it."""
@@ -558,6 +570,9 @@ class EchoAudio:
         if self._handed_off_at is None or self._hang_up_at is not None:
             return False
         with self._lock:
+            if self._audible_until > self._handed_off_at:
+                self._handed_off_at = None
+                return False
             quiet_since = max(self._handed_off_at, self._passed_at, self._sent_until)
         if self._clock() - quiet_since < HANDOFF_QUIET_S:
             return False
@@ -567,7 +582,8 @@ class EchoAudio:
     def operator_said(self, transcript: str) -> None:
         if GOODBYE.search(transcript):
             self._said_goodbye_at = self._clock()
-            if len(transcript.split()) <= GOODBYE_WORDS and "stop" not in transcript.lower():
+            stopped_target = "stop" in transcript.lower() and bool(_STOP_TARGET.search(transcript))
+            if len(transcript.split()) <= GOODBYE_WORDS and not stopped_target:
                 self.request_hang_up()
         else:
             self._said_other_at = self._clock()
@@ -584,8 +600,12 @@ class EchoAudio:
 
         asked_at = self._clock()
         insisted = asked_at - self._refused_at <= GOODBYE_INSISTED_S
+        with self._lock:
+            interrupted_reply = self._audible_until > 0 and asked_at - self._audible_until <= 3.0
+        if insisted or interrupted_reply:
+            return True
         deadline = time.monotonic() + GOODBYE_WAIT_S
-        while not insisted and (said := self.said_goodbye()) is not True:
+        while (said := self.said_goodbye()) is not True:
             if said is False or self._sound_began_at > asked_at or time.monotonic() >= deadline:
                 if said is None and self._sound_began_at <= asked_at:
                     break
@@ -867,7 +887,6 @@ class _Conversation:
         while not self._session.done():
             if self.active:
                 if self.audio.take_settled_handoff():
-                    self.audio.request_hang_up(after_reply=True)
                     self.announcements.put_nowait(handoff_commands())
                 if self.audio.hung_up():
                     _log.info("echo: hanging up, ending the session")
@@ -943,8 +962,23 @@ UNCLEAR_TOOL: dict = {
         "additionalProperties": False,
     },
 }
+GET_TIME_TOOL: dict = {
+    "type": "function",
+    "name": "get_time",
+    "description": (
+        "Get the current local time and date. Call this whenever asked for the time or date, "
+        "including alongside home_control or delegate_task in the same turn."
+    ),
+    "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+}
 NOT_ASKED = "Nothing was said."
 ASKED = {True: "Hvad siger du?", False: "Sorry?"}
+
+
+def run_get_time(arguments: dict) -> str:
+    if _calling is not None:
+        _calling.clear_handoff()
+    return time.strftime("%H:%M, %A %d %B %Y")
 
 
 def run_unclear(arguments: dict) -> str:

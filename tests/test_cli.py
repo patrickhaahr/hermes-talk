@@ -925,6 +925,14 @@ FREE = object()
             ],
             "On it.",
         ),
+        (
+            [
+                ("delegate_task", "WORK_STARTED #4 kind=agent (news) — running"),
+                ("home_control", "done: lights off"),
+                ("get_time", "23:49, Friday 27 November 2026"),
+            ],
+            FREE,
+        ),
         ([("delegate_task", "I can't start that yet — nika is busy.")], FREE),
         ([("end_call", "There is no call on the Echo to end.")], FREE),
     ],

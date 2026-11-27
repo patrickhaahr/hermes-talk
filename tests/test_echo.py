@@ -591,6 +591,35 @@ def test_a_handoff_is_acknowledged_and_closed_once_the_operator_is_quiet(monkeyp
     assert audio.hung_up()
 
 
+def test_handoff_skips_delayed_ack_when_reply_already_spoke(monkeypatch):
+    clock = Clock()
+    audio = EchoAudio(lambda _: None, clock=clock)
+    monkeypatch.setattr(talk_echo, "_calling", audio)
+    audio.handed_off()
+    clock.now += 0.5
+    audio.queue_playback(_ms(400), "combo-time-and-on-it")
+    audio.pace_once()
+    clock.now += talk_echo.HANDOFF_QUIET_S + 1.0
+    assert not audio.take_settled_handoff()
+
+    audio.handed_off()
+    talk_echo.run_get_time({})
+    clock.now += talk_echo.HANDOFF_QUIET_S + 1.0
+    assert not audio.take_settled_handoff()
+
+
+def test_end_call_accepts_garbled_barge_in_right_after_reply(monkeypatch):
+    clock = Clock()
+    audio = EchoAudio(lambda _: None, clock=clock)
+    monkeypatch.setattr(talk_echo, "_calling", audio)
+    monkeypatch.setattr(talk_echo, "GOODBYE_WAIT_S", 0.1)
+    audio.queue_playback(_ms(500), "news")
+    audio.pace_once()
+    clock.now += 0.8
+    audio.operator_said("Hello.")
+    assert talk_echo.run_end_call({}) == talk_echo.HANGING_UP
+
+
 @pytest.mark.parametrize(
     ("heard", "hangs_up"),
     [("Farvel.", True), ("Tovel.", True), ("Forvel farve.", True), ("Thank you, bye-bye.", True),
@@ -609,7 +638,9 @@ def test_end_call_needs_a_goodbye_the_transcriber_heard_too(monkeypatch, heard, 
 
 @pytest.mark.parametrize(
     ("heard", "hangs_up"),
-    [("Bye-bye.", True), ("Okay, that's it.", True), ("Tak, farvel.", True), ("Stop.", False),
+    [("Bye-bye.", True), ("Okay, that's it.", True), ("Tak, farvel.", True), ("Stop.", True),
+     ("Okay, stop.", True), ("Slut.", True), ("Hold op.", True), ("Okay, tak.", True),
+     ("Stop the music.", False), ("Stop work.", False),
      ("Play.", False), ("How do you say goodbye in Danish?", False)],
 )
 def test_a_plain_goodbye_hangs_up_without_the_model(heard, hangs_up):
@@ -756,11 +787,15 @@ def test_end_call_is_offered_only_to_a_surface_that_can_hang_up():
 
     assert "end_call" in names(hangable=True)
     assert "end_call" not in names()
+    assert "get_time" in names(hangable=True)
+    assert "get_time" not in names()
     # A misheard room fragment once made the speaker recite the whole skill catalog.
     assert "talk_capabilities" in names()
     assert "talk_capabilities" not in names(hangable=True)
     assert talk_tools._HANDLERS["end_call"] is talk_echo.run_end_call
+    assert talk_tools._HANDLERS["get_time"] is talk_echo.run_get_time
     assert "end_call" in talk_operator_auth.READ_ONLY_TALK_TOOLS
+    assert "get_time" in talk_operator_auth.READ_ONLY_TALK_TOOLS
 
 
 def test_a_standby_taking_the_call_learns_the_time_it_started():
