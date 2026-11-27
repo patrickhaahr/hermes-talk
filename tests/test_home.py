@@ -25,6 +25,23 @@ def test_each_device_maps_to_its_cli_call():
     assert talk_home.argv("lights", " Off ") == ["openhome", "lights", "off"]
     assert talk_home.argv("tv", "power") == ["openhome", "ir", "lgtv", "power"]
     assert talk_home.argv("speaker", "volume-up") == ["openhome", "ir", "edifier", "volume-up"]
+    assert talk_home.argv("backlight", "red") == ["openhome", "backlight", "red"]
+    assert talk_home.argv("backlight", "red", brightness=40) == [
+        "openhome", "backlight", "red", "--brightness", "40",
+    ]
+    assert talk_home.argv("backlight", "color 0080ff", brightness=80) == [
+        "openhome", "backlight", "color", "0080ff", "--brightness", "80",
+    ]
+    assert talk_home.argv("backlight", "tv") == ["openhome", "backlight", "tv"]
+    assert talk_home.argv("backlight", "automatic") == ["openhome", "backlight", "automatic"]
+    assert talk_home.argv("backlight", "off", brightness=50) == ["openhome", "backlight", "off"]
+
+
+def test_backlight_device_write_failure_is_reported():
+    runner = Runner(stdout='{"intended":{"mode":"color"},"command":"failed"}')
+    reply = talk_home.run({"device": "backlight", "command": "red"}, runner=runner)
+    assert not talk_home.worked(reply)
+    assert "failed" in reply
 
 
 def test_an_unknown_device_or_an_option_shaped_command_runs_nothing():
@@ -33,6 +50,9 @@ def test_an_unknown_device_or_an_option_shaped_command_runs_nothing():
         ("tv", ""),
         ("tv", "--url=http://evil"),
         ("tv", "-h"),
+        ("backlight", "status"),
+        ("backlight", "color --bad"),
+        ("backlight", "color"),
     ):
         runner = Runner()
         assert "unknown device or command" in talk_home.run(
