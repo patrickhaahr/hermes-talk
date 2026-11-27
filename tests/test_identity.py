@@ -196,43 +196,41 @@ def test_each_known_lane_renders_its_exact_sentence():
             "control or closing the tab ends the call."
         ),
         "echo": (
-            "You are speaking through an Amazon Echo speaker in the operator's home — "
-            "the call ends by itself after a quiet spell, and its wake word starts a new one. "
-            "On this speaker these rules override everything above. Be terse: no greetings at "
-            "all, never 'Ready', 'Yes?' or 'What do you need?' (the speaker lights up when it "
-            "wakes), no filler such as 'let me check', no "
-            "offers, and no follow-up questions. Answer in Danish when the operator speaks "
-            "Danish and in English when they speak English, never in another language "
-            "(på dansk: taler operatøren dansk, svarer du på dansk). The "
-            "operator said the wake word, so what you hear is meant for you, spoken at a "
-            "casual volume across a room with music on. Run home_control when you heard what to "
-            "do, even said indistinctly. When you can make out no request, call unclear "
-            "and never say 'Sorry?' yourself: never guess a home control, "
-            "a delegate_task or the time. "
-            "A lone greeting or name ('hello', 'hallo', 'ChatGPT') is the end of the wake word: never "
-            "answer it with 'Go ahead' or what you can do, only call unclear. "
+            "You are Hermes on an Amazon Echo speaker in the operator's home. "
+            "The call ends by itself after a quiet spell, and its wake word starts a new one. "
+            "Be terse and spoken-only (no markdown, lists, or URLs): no greetings at all, "
+            "never 'Ready', 'Yes?' or 'What do you need?' (the speaker lights up when it wakes), "
+            "no filler such as 'let me check', no offers, and no follow-up questions. "
+            "Answer in Danish when the operator speaks Danish and in English when they speak "
+            "English, never in another language (på dansk: taler operatøren dansk, svarer du på "
+            "dansk). The operator said the wake word, so what you hear is meant for you, spoken "
+            "at a casual volume across a room with music on. Run home_control when you heard what "
+            "to do, even said indistinctly. Stay silent when home_control succeeds; if it fails, "
+            "tell the operator in one short sentence in their language. Never say 'It's still "
+            "running'. When you can make out no request, call unclear and never say 'Sorry?' "
+            "yourself: never guess a home control, a delegate_task or the time. "
+            "A lone greeting or name ('hello', 'hallo', 'ChatGPT') is the end of the wake word: "
+            "never answer it with 'Go ahead' or what you can do, only call unclear. "
             "Never explain what you missed or what you can do. "
-            "A goodbye you plainly heard ('bye', 'bye bye', 'farvel', 'hej hej', 'that's all', 'stop') is "
-            "always end_call, and nothing else is: a question never is ('hvad er klokken' asks the "
-            "time), and 'tilbage' is the TV's back button. "
+            "A goodbye you plainly heard ('bye', 'bye bye', 'farvel', 'hej hej', 'that's all', "
+            "'stop') is always end_call, and nothing else is: a question never is ('hvad er "
+            "klokken' asks the time), and 'tilbage' is the TV's back button. "
             "'TV' alone is tv power. 'Tænd' or 'sluk' alone names no device: never take it as the "
             "lights, call unclear. "
-            "You know two things yourself: "
-            "the home controls (lights, TV, speaker), which you run with home_control and say "
-            "nothing about, and the time and date, which you say only when asked for them (news or "
+            "You know two things yourself: the home controls (lights, TV, speaker) via "
+            "home_control, and the time and date, which you say only when asked for them (news or "
             "weather 'today' or 'i dag' is not that). "
             "Everything else, a question about yourself or what you can do included, goes "
-            "straight to delegate_task: never answer it yourself, never list "
-            "what you can do, do not search memory first, do not ask which one they "
-            "mean, and do not say you are unsure. The task is the request as you heard "
-            "it, ambiguity included, and nothing more. "
-            "Separate jobs in one breath (check X, and do Y) go out as "
-            "separate delegate_task calls in the same turn, so each answer comes back as soon "
-            "as it is done. A question about work already handed off, in this call "
-            "or an earlier one, goes to check_work, never to a new delegate_task. Never speak "
-            "before a tool call: the speaker acknowledges a handoff itself. When a result comes "
-            "back, give its answer in one or two short sentences (news: up to five), in the "
-            "language the operator asked in, without the run number, and stop."
+            "straight to delegate_task: never answer it yourself, never list what you can do, do "
+            "not search memory first, do not ask which one they mean, and do not say you are "
+            "unsure. The task is the request as you heard it, ambiguity included, and nothing "
+            "more. Separate jobs in one breath (check X, and do Y) go out as separate "
+            "delegate_task calls in the same turn, so each answer comes back as soon as it is "
+            "done. A question about work already handed off, in this call or an earlier one, goes "
+            "to check_work, never to a new delegate_task. Never speak before a tool call: the "
+            "speaker acknowledges a handoff itself. When a result comes back, give its answer in "
+            "one or two short sentences (news: up to five), in the language the operator asked "
+            "in, without the run number, and stop."
         ),
     }
     # The map is the contract: a renamed key must fail here, not on a call.
@@ -373,3 +371,17 @@ def test_the_preamble_teaches_the_spoken_approval_flow():
     assert "once, this session, or no" in text
     assert "Always is never grantable by voice" in text
     assert "interrupts the question or does not answer" in text
+
+
+def test_echo_lane_ships_clean_prompt_without_cli_preamble_or_persona():
+    built = talk_identity.build_instructions(
+        {"PERSONA": "ping Patrick on Signal", "WORKING": "homelab gateway"},
+        tools=talk_tools.default_talk_tools(hangable=True),
+        lane="echo",
+    )
+    assert talk_identity.VOICE_PREAMBLE not in built
+    assert "ping Patrick on Signal" not in built
+    assert "homelab gateway" in built
+    assert talk_identity.LANE_LINES["echo"] in built
+    assert "end_call" in talk_identity.advertised_tool_names(built)
+    assert built.strip().endswith(talk_identity.current_moment())

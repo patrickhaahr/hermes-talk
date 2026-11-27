@@ -113,10 +113,10 @@ DEFAULT_BARGE_IN_LEVEL = 0.02
 #: reply audio sent within ECHO_SPAN_S, which covers its trip back to the mic.
 ECHO_RATIO = 2.0
 ECHO_SPAN_S = 0.8
-#: How long the reply still comes back after its last audio was sent: the trip
-#: to the mic takes 0.3-0.45 s, and the room rings on. A leftover let through
-#: here is answered as the operator, often as their goodbye.
 ECHO_TAIL_S = 0.6
+SILENT_REPLY_RMS = 0.003
+UNCLEAR_SPEECH_S = 1.0
+UNCLEAR_COOLDOWN_S = 6.0
 
 CONNECT_TIMEOUT_S = 10.0
 LINK_PROBE_IDLE_S = 15
@@ -403,8 +403,11 @@ class EchoAudio:
         self._hang_up_after_reply = False
         self._handed_off_at: float | None = None
         self._passed_at = self._sound_began_at = float("-inf")
+        self._last_heard_s = 0.0
         self._said_goodbye_at = self._said_other_at = self._refused_at = float("-inf")
+        self._woken = True
         self._may_ask = True
+        self._asked_at = float("-inf")
         self._barge_in_level = barge_in_level
         self._gate = TalkerGate()
         self._levels: dict[bool, list[float]] = {True: [], False: []}
@@ -426,6 +429,7 @@ class EchoAudio:
         self._played_item_id: str | None = None
         self._played_frames = 0
         self._sent_until = 0.0
+        self._audible_until = 0.0
         self._started_reply = False
         self._last_activity = clock()
         self._last_spoke = clock()
@@ -462,7 +466,7 @@ class EchoAudio:
         level = talk_audio._pcm16_rms(pcm)
         with self._lock:
             now = self._clock()
-            echo_playing = self._sent_until + ECHO_TAIL_S > now and now >= self._open_until
+            echo_playing = self._audible_until + ECHO_TAIL_S > now and now >= self._open_until
             levels = self._levels[echo_playing]
             if len(levels) < 20_000:
                 levels.append(level)
@@ -480,6 +484,7 @@ class EchoAudio:
                 if now - self._passed_at > GATE_FRAME_S * GATE_HANG_FRAMES:
                     self._sound_began_at = now
                 self._passed_at = now
+                self._last_heard_s = max(GATE_FRAME_S, now - self._sound_began_at)
             self._input.append(pcm)
             self._input_bytes += len(pcm)
             # Newest audio wins, as on the terminal: stale speech corrupts the turn.
@@ -590,12 +595,22 @@ class EchoAudio:
         return True
 
     def take_question(self) -> bool:
-        """Whether "Sorry?" may be said: once a call, and never to a room nobody woke it in."""
-
-        may, self._may_ask = self._may_ask, False
-        return may
+        now = self._clock()
+        if self._may_ask:
+            self._may_ask = False
+            self._asked_at = now
+            return True
+        if (
+            self._woken
+            and self._last_heard_s >= UNCLEAR_SPEECH_S
+            and now - self._asked_at >= UNCLEAR_COOLDOWN_S
+        ):
+            self._asked_at = now
+            return True
+        return False
 
     def allow_question(self, allowed: bool) -> None:
+        self._woken = allowed
         self._may_ask = allowed
 
     def hung_up(self) -> bool:
@@ -642,17 +657,21 @@ class EchoAudio:
         with self._lock:
             if not self._playback:
                 return
-            fresh = self._sent_until + ECHO_TAIL_S < now
+            fresh = self._audible_until + ECHO_TAIL_S < now
             self._sent_until = max(self._sent_until, now)
             due = round((now + PLAYBACK_LEAD_S - self._sent_until) * RATE) * FRAME_BYTES
             if due <= 0:
                 return
             chunk = self._take_playback(due)
             self._sent_until += len(chunk) / (RATE * FRAME_BYTES)
-            self._echo.append((self._sent_until, talk_audio._pcm16_rms(chunk)))
+            chunk_rms = talk_audio._pcm16_rms(chunk)
+            audible = chunk_rms >= SILENT_REPLY_RMS
+            if audible:
+                self._audible_until = self._sent_until
+                self._echo.append((self._sent_until, chunk_rms))
             begin = not self._started_reply
             self._started_reply = True
-        if fresh:
+        if fresh and audible:
             _log.info("echo: reply audio, %.2f s after the operator last spoke", self.since_spoke())
         if begin:
             if self._on_speech is not None:
@@ -935,13 +954,17 @@ def run_unclear(arguments: dict) -> str:
 
 
 def note_action(what: str) -> None:
-    """Log a tool call or delegation with its latency, for comparing voice models."""
-
     if _calling is not None:
         _log.info("echo: action %s, %.2f s after the operator last spoke",
                   what[:120], _calling.since_spoke())
         if not what.startswith((UNCLEAR_TOOL["name"], END_CALL_TOOL["name"])):
             _calling.mark_activity()
+            _calling.allow_question(True)
+
+
+def note_outcome(what: str) -> None:
+    if _calling is not None:
+        _log.warning("echo: %s", what[:240])
 
 
 HANGING_UP = "Hanging up after the operator's goodbye."

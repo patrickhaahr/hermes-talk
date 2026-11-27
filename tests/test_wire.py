@@ -47,6 +47,9 @@ def test_room_speaker_input_settings_come_from_the_environment(monkeypatch):
     monkeypatch.setenv("TALK_NOISE_REDUCTION", "off")
     assert audio_input()["noise_reduction"] is None
 
+    monkeypatch.setenv("TALK_SILENCE_MS", "800")
+    assert audio_input()["turn_detection"]["silence_duration_ms"] == 800
+
 
 def test_turn_detection_encoder_has_exact_native_server_and_semantic_shapes():
     expected_server = {

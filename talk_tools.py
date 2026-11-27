@@ -528,8 +528,12 @@ def execute_talk_tool(name: str, arguments: dict | None) -> str:
         return f"{name} failed: {type(exc).__name__}: {exc}"
     if name == "home_control" and not talk_home.worked(output):
         _log.warning("home_control: %s", output)
-    if name == "delegate_task" and output.startswith("WORK_STARTED"):
-        talk_echo.handed_off()
+        talk_echo.note_outcome(f"home_control: {output}")
+    if name == "delegate_task":
+        if output.startswith("WORK_STARTED"):
+            talk_echo.handed_off()
+        else:
+            talk_echo.note_outcome(f"delegate_task: {output}")
     return (output or "(no output)")[:MAX_OUTPUT_CHARS]
 
 

@@ -89,11 +89,15 @@ def encode_turn_detection(
         rt.RealtimeTurnDetectionMode.PROVIDER_NATIVE,
         rt.RealtimeTurnDetectionMode.SERVER_VAD,
     }:
-        return {
+        config: dict = {
             "type": "server_vad",
             "create_response": automatic_response,
             "interrupt_response": True,
         }
+        raw_silence = (os.environ.get("TALK_SILENCE_MS") or "").strip()
+        if raw_silence.isdigit() and int(raw_silence) > 0:
+            config["silence_duration_ms"] = int(raw_silence)
+        return config
     raise ValueError(f"unsupported OpenAI turn detection mode: {mode!r}")
 
 

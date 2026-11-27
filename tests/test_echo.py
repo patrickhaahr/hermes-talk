@@ -650,7 +650,8 @@ def test_the_room_does_not_keep_the_call_open_but_someone_speaking_puts_the_end_
 def test_sorry_is_asked_once_a_call_and_not_in_one_nobody_woke(monkeypatch):
     import talk_tools
 
-    audio = EchoAudio(lambda _: None)
+    clock = Clock()
+    audio = EchoAudio(lambda _: None, clock=clock)
     monkeypatch.setattr(talk_echo, "_calling", audio)
     def say(danish):
         output = talk_tools.execute_talk_tool("unclear", {"danish": danish})
@@ -658,8 +659,29 @@ def test_sorry_is_asked_once_a_call_and_not_in_one_nobody_woke(monkeypatch):
 
     said = [say(True), say(False)]
     assert said == ["Hvad siger du?", ""]
+    clock.now += talk_echo.UNCLEAR_COOLDOWN_S
+    for _ in range(100):
+        audio.feed_microphone(_pcm([9000, -9000] * 128))
+        clock.now += 0.016
+    assert say(False) == "Sorry?"
+    assert say(False) == ""
     audio.allow_question(False)
+    clock.now += talk_echo.UNCLEAR_COOLDOWN_S
+    for _ in range(100):
+        audio.feed_microphone(_pcm([9000, -9000] * 128))
+        clock.now += 0.016
     assert talk_echo.run_unclear({"danish": False}) == talk_echo.NOT_ASKED
+
+
+def test_silent_reply_audio_does_not_gate_the_microphone():
+    clock = Clock()
+    audio = EchoAudio(lambda _: None, clock=clock, barge_in_level=0.02)
+    for _ in range(10):
+        audio.feed_microphone(_pcm([100, 100, -100, -100] * 256))
+    audio.queue_playback(bytes(talk_echo.RATE * 2), "silent")
+    audio.pace_once()
+    soft = _pcm([550, 550, -550, -550] * 1000)
+    assert _heard(audio, soft)
 
 
 def test_end_call_plays_the_goodbye_then_the_bye_tone_then_hands_back(monkeypatch):

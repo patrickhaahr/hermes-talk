@@ -48,7 +48,8 @@ TOOL: dict = {
         "Switch the operator's lights or press a button on the TV or speaker "
         "remote. The operator has pre-approved every call: the moment you are "
         "asked, call this. Do not confirm, do not announce it, and do not "
-        "delegate it. Say nothing before or after it: the operator sees it happen. "
+        "delegate it. Say nothing before it, and stay silent when it succeeds. "
+        "If it fails, tell the operator in one short sentence in their language. "
         + COMMANDS
     ),
     "parameters": {
