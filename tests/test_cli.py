@@ -927,6 +927,16 @@ FREE = object()
         ),
         (
             [
+                ("home_control", "done: lights off"),
+                ("home_control", "done: tv power"),
+                ("home_control", "done: backlight red"),
+                ("delegate_task", "WORK_STARTED #4 kind=agent (news) — running"),
+                ("delegate_task", "WORK_STARTED #5 kind=agent (homelab) — running"),
+            ],
+            "On it.",
+        ),
+        (
+            [
                 ("delegate_task", "WORK_STARTED #4 kind=agent (news) — running"),
                 ("home_control", "done: lights off"),
                 ("get_time", "23:49, Friday 27 November 2026"),
@@ -952,7 +962,7 @@ def test_a_tool_batch_gets_its_scripted_reply_or_none(calls, reply):
             sent.extend(batch)
 
         coordinator = talk_cli.ToolResponseCoordinator(
-            Relay(), send, max_pending=4, provider_neutral=True
+            Relay(), send, max_pending=talk_cli.TOOL_SESSION_QUEUE_SIZE, provider_neutral=True
         )
         worker = asyncio.create_task(coordinator.run())
         for i, (name, _out) in enumerate(calls):

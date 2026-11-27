@@ -46,7 +46,7 @@ UNPARSEABLE_ARGS_TEXT = (
 #: the Realtime turn gets an honest output instead of permanent silence.
 TOOL_EXECUTION_WAIT_S = 5.0
 TOOL_WORKERS = 2
-TOOL_PENDING_JOBS = 4
+TOOL_PENDING_JOBS = 8
 
 #: How many settled response ids the relay remembers. Late deltas arrive within
 #: seconds of a cancel, so a short memory is enough — and a long call must not
