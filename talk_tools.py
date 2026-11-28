@@ -530,11 +530,8 @@ def execute_talk_tool(name: str, arguments: dict | None) -> str:
     if name == "home_control" and not talk_home.worked(output):
         _log.warning("home_control: %s", output)
         talk_echo.note_outcome(f"home_control: {output}")
-    if name == "delegate_task":
-        if output.startswith("WORK_STARTED"):
-            talk_echo.handed_off()
-        else:
-            talk_echo.note_outcome(f"delegate_task: {output}")
+    if name == "delegate_task" and not output.startswith("WORK_STARTED"):
+        talk_echo.note_outcome(f"delegate_task: {output}")
     return (output or "(no output)")[:MAX_OUTPUT_CHARS]
 
 
@@ -924,8 +921,8 @@ def _handle_talk_capabilities(arguments: dict) -> str:
     return rendered
 
 
-def _handoff_reply() -> str:
-    return "" if talk_echo.in_call() else talk_echo.HANDOFF_REPLY
+def _handoff_reply() -> str | None:
+    return None if talk_echo.in_call() else talk_echo.HANDOFF_REPLY
 
 
 #: What the speaker says after a tool result instead of a free reply, "" for

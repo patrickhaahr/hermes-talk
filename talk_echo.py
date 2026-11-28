@@ -140,12 +140,7 @@ STANDBY_RETRY_MAX_S = 60.0
 #: the Echo is silent, never sooner than this: a goodbye a moment late still plays.
 HANG_UP_MIN_S = 0.5
 HANG_UP_MAX_S = 10.0
-#: After a handoff the operator may go on to the next command, and "On it." said
-#: at once made the Echo deaf to it: it is said, and the call closes, once nothing
-#: was heard for this long.
 HANDOFF_REPLY = "On it."
-HANDOFF_QUIET_S = 2.0
-#: Talked over, the reply never plays.
 REPLY_COMES_WITHIN_S = 5.0
 #: The model hung up on a misheard "TV", so a goodbye must also be in what the
 #: transcriber heard, which can arrive a little after end_call. "Farvel" has
@@ -406,7 +401,6 @@ class EchoAudio:
         self._on_speech = on_speech
         self._hang_up_at: float | None = None
         self._hang_up_after_reply = False
-        self._handed_off_at: float | None = None
         self._passed_at = self._sound_began_at = float("-inf")
         self._last_heard_s = 0.0
         self._said_goodbye_at = self._said_other_at = self._refused_at = float("-inf")
@@ -542,10 +536,7 @@ class EchoAudio:
         return self._clock() - self._last_spoke
 
     def mark_activity(self) -> None:
-        now = self._clock()
-        self._last_activity = now
-        if self._handed_off_at is not None:
-            self._handed_off_at = max(self._handed_off_at, now)
+        self._last_activity = self._clock()
 
     def call_started(self) -> None:
         with self._lock:
@@ -556,28 +547,6 @@ class EchoAudio:
         if self._hang_up_at is None:
             self._hang_up_at = self._clock()
             self._hang_up_after_reply = after_reply
-            self._handed_off_at = None
-
-    def handed_off(self) -> None:
-        self._handed_off_at = self._clock()
-
-    def clear_handoff(self) -> None:
-        self._handed_off_at = None
-
-    def take_settled_handoff(self) -> bool:
-        """Once per handoff: the operator has gone quiet after it."""
-
-        if self._handed_off_at is None or self._hang_up_at is not None:
-            return False
-        with self._lock:
-            if self._audible_until > self._handed_off_at:
-                self._handed_off_at = None
-                return False
-            quiet_since = max(self._handed_off_at, self._passed_at, self._sent_until)
-        if self._clock() - quiet_since < HANDOFF_QUIET_S:
-            return False
-        self._handed_off_at = None
-        return True
 
     def operator_said(self, transcript: str) -> None:
         if GOODBYE.search(transcript):
@@ -886,8 +855,6 @@ class _Conversation:
         born, born_wall = loop.time(), time.time()
         while not self._session.done():
             if self.active:
-                if self.audio.take_settled_handoff():
-                    self.announcements.put_nowait(handoff_commands())
                 if self.audio.hung_up():
                     _log.info("echo: hanging up, ending the session")
                     await self.audio.play_out(BYE_TONE)
@@ -976,8 +943,6 @@ ASKED = {True: "Hvad siger du?", False: "Sorry?"}
 
 
 def run_get_time(arguments: dict) -> str:
-    if _calling is not None:
-        _calling.clear_handoff()
     return time.strftime("%H:%M, %A %d %B %Y")
 
 
@@ -1018,25 +983,6 @@ def run_end_call(arguments: dict) -> str:
 
 def in_call() -> bool:
     return _calling is not None
-
-
-def handed_off() -> None:
-    """The live call, if any, says so and closes once the operator is quiet."""
-
-    if _calling is not None:
-        _calling.handed_off()
-
-
-def handoff_commands() -> list:
-    try:
-        from . import talk_realtime
-    except ImportError:  # pragma: no cover - flat-module fallback
-        import talk_realtime
-    return [talk_realtime.StartResponse(
-        allow_tools=False,
-        input=(),
-        instructions=f"Say exactly '{HANDOFF_REPLY}' and nothing else.",
-    )]
 
 
 def clock_commands() -> list:
@@ -1159,9 +1105,8 @@ async def _linked(
                 if current is None:
                     _log.info("echo: wake word, starting a Talk session")
                     current = _Conversation(writer.write, runner, idle_s, ended, barge_in_level)
-                else:
-                    if not current.active:
-                        _log.info("echo: wake word, the standby session takes the call")
+                elif not current.active:
+                    _log.info("echo: wake word, the standby session takes the call")
                     current.woken()
             elif event.type == "detection":
                 if current is not None and current.active:

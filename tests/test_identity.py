@@ -211,9 +211,7 @@ def test_each_known_lane_renders_its_exact_sentence():
             "even said indistinctly. Stay silent when home_control succeeds; if it fails, tell "
             "the operator in one short sentence in their language. "
             "Call get_time whenever asked for the time or date (news or weather 'today' or 'i "
-            "dag' is not that); answer crisply ('Klokken er 23:45.' / 'It's 11:45.'), and if "
-            "you also called delegate_task in the same turn, end with 'På vej.' or 'On it.' "
-            "without repeating or describing the delegated task. "
+            "dag' is not that); answer crisply ('Klokken er 23:45.' / 'It's 11:45.'). "
             "Never say 'It's still running'. When you can make out no request, call unclear and "
             "never say 'Sorry?' yourself: never guess a home control, a delegate_task or the "
             "time. A lone greeting or name ('hello', 'hallo', 'ChatGPT') is the end of the wake "
@@ -236,9 +234,13 @@ def test_each_known_lane_renders_its_exact_sentence():
             "go out as separate delegate_task calls in the same turn so they run in parallel "
             "and each reports back as soon as it finishes. Only call check_work when the "
             "operator explicitly asks how an earlier task is going. Never speak before a tool "
-            "call: the speaker acknowledges a handoff itself. When a result comes back, give "
-            "its answer crisply in one or two short sentences (news: up to five), in the "
-            "language the operator asked in, without the run number, and stop."
+            "call. After delegate_task succeeds, confirm right away in 2 to 4 words in the "
+            "operator's language naming the topic ('Tjekker DR.', 'Tjekker DR og homelab.', "
+            "'Checking homelab.') — never mention Hermes, delegation, or background work. If "
+            "get_time also ran in the same turn, combine them in one short line ('Klokken er "
+            "23:45, tjekker DR.'). When a result comes back, give its answer crisply in one or "
+            "two short sentences (news: up to five), in the language the operator asked in, "
+            "without the run number, and stop."
         ),
     }
     # The map is the contract: a renamed key must fail here, not on a call.

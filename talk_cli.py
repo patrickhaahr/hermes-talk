@@ -2568,8 +2568,8 @@ def setup_cli(subparser: argparse.ArgumentParser) -> None:
     echo.add_argument("echo_host", metavar="HOST", help="the Echo's address")
     echo.add_argument("--port", dest="echo_port", type=int, default=16700,
                       help="hassmic's Wyoming port (default 16700)")
-    echo.add_argument("--idle", dest="echo_idle", type=float, default=20.0, metavar="SECONDS",
-                      help="end a session after this long with nobody speaking (default 20)")
+    echo.add_argument("--idle", dest="echo_idle", type=float, default=10.0, metavar="SECONDS",
+                      help="end a session after this long with nobody speaking (default 10)")
     echo.add_argument("--barge-in-level", dest="echo_barge_in", type=float, default=0.02,
                       metavar="RMS", help="mic level that may talk over the Echo (default 0.02)")
     echo_say = commands.add_parser(
