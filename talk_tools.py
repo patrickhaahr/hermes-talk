@@ -456,8 +456,8 @@ _TOOL_DELEGATE_WORDS: dict = {
             "task": {
                 "type": "string",
                 "description": (
-                    "One sentence in the exact language the operator spoke (Danish stays "
-                    "Danish, never translate to English), in their words. Never add "
+                    "One sentence in English (translate Danish concisely unless the operator "
+                    "explicitly asked for Danish), keeping their meaning. Never add "
                     "instructions, scope, format or explanations."
                 ),
             },

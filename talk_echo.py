@@ -949,7 +949,7 @@ def run_get_time(arguments: dict) -> str:
 def run_unclear(arguments: dict) -> str:
     if _calling is None or not _calling.take_question():
         return NOT_ASKED
-    return ASKED[bool(arguments.get("danish"))]
+    return ASKED[False]
 
 
 def note_action(what: str) -> None:

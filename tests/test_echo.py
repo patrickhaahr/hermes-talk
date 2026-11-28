@@ -649,7 +649,7 @@ def test_sorry_is_asked_once_a_call_and_not_in_one_nobody_woke(monkeypatch):
         return talk_tools.scripted_reply("unclear", output)
 
     said = [say(True), say(False)]
-    assert said == ["Hvad siger du?", ""]
+    assert said == ["Sorry?", ""]
     clock.now += talk_echo.UNCLEAR_COOLDOWN_S
     for _ in range(100):
         audio.feed_microphone(_pcm([9000, -9000] * 128))
